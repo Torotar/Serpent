@@ -27,6 +27,7 @@ import type { MessageBoxOptions, NativeImage } from "electron";
 
 import {
   installApplicationMenu,
+  setApplicationMenuCommandChecked,
   setApplicationMenuCommandEnabled,
   setApplicationMenuCommandLabel,
 } from "./application-menu";
@@ -173,6 +174,7 @@ import {
   SHELL_NOTIFY_CHANNEL,
   COMMAND_COMPLETED_CHANNEL,
   APPLICATION_MENU_ITEM_STATE_CHANNEL,
+  LINKED_MISSING_VISIBILITY_CHANNEL,
   SHELL_SWIPE_CHANNEL,
   WINDOW_FOCUS_CHANNEL,
   NATIVE_EDIT_COPY_CHANNEL,
@@ -2130,7 +2132,35 @@ async function processAiQueue(libraryId: string): Promise<void> {
   await aiQueueScheduler.trigger(libraryId);
 }
 
+/** Global menu preference: linked-folder assets with a missing source stay listed. */
+let showMissingLinkedFiles = true;
+
 /** Shared post-open hook for dialog opens and startup recent-library restore. */
+function pluginThumbnailExtensionsFor(libraryId: string): string[] {
+  const extensions = new Set<string>();
+  for (const provider of pluginActivationCoordinator?.listActiveProviders(libraryId) ?? []) {
+    if (provider.kind !== 'thumbnail') continue;
+    for (const raw of provider.extensions ?? []) {
+      const extension = raw.replace(/^\./u, '').toLowerCase();
+      if (/^[a-z0-9][a-z0-9+_-]*$/u.test(extension)) extensions.add(extension);
+    }
+  }
+  return [...extensions];
+}
+
+async function syncPluginThumbnailExtensions(): Promise<void> {
+  const client = workerClient;
+  if (!client) return;
+  const listed = await client.request({ type: 'library.list' });
+  if (!listed.ok || listed.type !== 'library.list') return;
+  for (const library of listed.libraries) {
+    client.publishPluginThumbnailExtensions(
+      library.libraryId,
+      pluginThumbnailExtensionsFor(library.libraryId),
+    );
+  }
+}
+
 async function notifyLibraryOpenedSideEffects(input: {
   libraryId: string;
   libraryDirectory: string;
@@ -2150,6 +2180,8 @@ async function notifyLibraryOpenedSideEffects(input: {
   // library is open, tick only jobs explicitly enqueued or retried in this
   // application session; interrupted rows are never auto-recovered.
   pluginJobScheduler?.tick(input.libraryId);
+  await syncPluginThumbnailExtensions();
+  workerClient?.publishShowMissingLinkedFiles(showMissingLinkedFiles);
 }
 
 async function processAiQueueBatch(
@@ -2333,6 +2365,8 @@ async function commandFor(
     case "folder.create.request":
     case "folder.rename.request":
     case "appearance.set.request":
+    case "folder.cover.set.request":
+    case "folder.cover.clear.request":
     case "folder.list.request":
     case "folder.browse-entries.request":
     case "folder.entries-request":
@@ -2351,7 +2385,7 @@ async function commandFor(
     case "folder.paste.request":
     case "folder.clone.request":
     case "folder.move.request": {
-      return executeFolderMainCommand(request);
+      return executeFolderMainCommand(request, { createNativeDialogHost });
     }
     case "asset.list.request": {
       return executeAssetQueryMainCommand(request);
@@ -2461,6 +2495,8 @@ async function commandFor(
     case "asset.copy.request":
     case "asset.copy-undo.request":
     case "asset.rename-file.request":
+    case "asset.zip.list.request":
+    case "asset.zip.read-entry.request":
     case "asset.text.read.request":
     case "asset.text.save.request":
     case "asset.delete-permanent.request":
@@ -3705,6 +3741,7 @@ async function startApplication(): Promise<void> {
     },
   );
   await workerClient.start();
+  workerClient.publishShowMissingLinkedFiles(showMissingLinkedFiles);
   // Serpent-65d837: remove any `.del-*` aside roots that could not be deleted
   // during a previous session (deferred-cleanup store, backoff loop).
   retryPendingLibraryCleanups();
@@ -4681,6 +4718,14 @@ async function startApplication(): Promise<void> {
           logger?.error('plugin.providers.materialize', error, { libraryId });
         });
         embeddedMcpServer?.notifyToolsChanged();
+        void syncPluginThumbnailExtensions().catch((error) => {
+          logger?.error('plugin.thumbnail-extensions', error, { libraryId });
+        });
+      },
+      onProvidersChanged: () => {
+        void syncPluginThumbnailExtensions().catch((error) => {
+          logger?.error('plugin.thumbnail-extensions', error);
+        });
       },
       logger,
     });
@@ -4998,6 +5043,50 @@ async function startApplication(): Promise<void> {
           return new Response("App asset not found", { status: 404 });
         }
         return response;
+      }
+      if (url.hostname === "folder-cover") {
+        const folderLibraryId = decodeURIComponent(url.pathname.replace(/^\/+/, "").split("/")[0] ?? "");
+        const folderId = url.searchParams.get("folder") ?? "";
+        if (
+          !folderLibraryId
+          || !folderId
+          || folderId.length > 4096
+          || folderLibraryId.includes("..")
+          || folderId.includes("\0")
+        ) {
+          return new Response("Invalid folder cover", { status: 400 });
+        }
+        if (isLibraryMediaReadBlocked(folderLibraryId)) {
+          return new Response("Library unavailable", { status: 410 });
+        }
+        if (!workerClient) return new Response("Worker unavailable", { status: 503 });
+        try {
+          const resolved = await workerClient.request({
+            type: "folder.cover.resolve",
+            libraryId: folderLibraryId,
+            folderId,
+          });
+          if (!resolved.ok || resolved.type !== "folder.cover.resolved") {
+            return new Response("Folder cover not found", { status: 404 });
+          }
+          return await createArtifactResponse(
+            resolved.absolutePath,
+            resolved.mimeType,
+            {
+              rangeHeader: request.headers.get("range"),
+              signal: bindLibraryMediaReadSignal(folderLibraryId, request.signal),
+              onStreamError: (error) =>
+                logger?.error("serpent-protocol.folder-cover-stream", error, {
+                  libraryId: folderLibraryId,
+                }),
+            },
+          );
+        } catch (error) {
+          logger?.error("serpent-protocol.folder-cover-read", error, {
+            libraryId: folderLibraryId,
+          });
+          return new Response("Folder cover unreadable", { status: 404 });
+        }
       }
       if (
         url.hostname !== "preview" &&
@@ -5825,6 +5914,14 @@ async function startApplication(): Promise<void> {
 
   // Serpent-q0b1: the renderer syncs native menu item enabled-state (business
   // undo/redo availability). Only commands from the real window are accepted.
+  ipcMain.handle(LINKED_MISSING_VISIBILITY_CHANNEL, (event, input: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return;
+    if (typeof input !== "boolean") return;
+    showMissingLinkedFiles = input;
+    workerClient?.publishShowMissingLinkedFiles(input);
+    setApplicationMenuCommandChecked("library.show-missing-linked", input);
+  });
+
   ipcMain.handle(APPLICATION_MENU_ITEM_STATE_CHANNEL, (event, input: unknown) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       return;

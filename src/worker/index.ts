@@ -58,8 +58,10 @@ import {
   boundedWriteLibraryId,
   executeBoundedWriteWorkerCommand,
 } from './bounded-write-command';
+import { parseLinkedMissingVisibilityMessage } from '../shared/linked-missing-visibility';
 import {
   parsePluginMediaProviderResponse,
+  parsePluginThumbnailExtensionsMessage,
   type PluginMediaProviderRequest,
   type PluginMediaProviderResult,
 } from '../shared/plugin-media-protocol';
@@ -2386,6 +2388,20 @@ async function handleRequestWithoutWriteLease(request: WorkerRequest): Promise<W
       throw new Error('Bounded folder.create write was not dispatched through its transaction fence.');
     case 'appearance.set':
       throw new Error('Bounded appearance.set write was not dispatched through its transaction fence.');
+    case 'folder.cover.set':
+      throw new Error('Bounded folder.cover.set write was not dispatched through its transaction fence.');
+    case 'folder.cover.clear':
+      throw new Error('Bounded folder.cover.clear write was not dispatched through its transaction fence.');
+    case 'folder.cover.resolve': {
+      const resolved = libraryService.resolveFolderCustomCover(request.command);
+      if (!resolved) throw new LibraryServiceError('FOLDER_NOT_FOUND');
+      return {
+        ok: true,
+        type: 'folder.cover.resolved',
+        absolutePath: resolved.absolutePath,
+        mimeType: resolved.mimeType,
+      };
+    }
     case 'folder.rename':
     case 'folder.clone':
     case 'folder.move':
@@ -2562,6 +2578,8 @@ async function handleRequestWithoutWriteLease(request: WorkerRequest): Promise<W
     case 'asset.rename-files':
     case 'asset.restore-if-original-vacant':
     case 'asset.palette.aggregate-recent':
+    case 'asset.zip.list':
+    case 'asset.zip.read-entry':
     case 'asset.text.read':
     case 'asset.text.save':
     case 'asset.delete-permanent':
@@ -2851,6 +2869,25 @@ const handleLibraryWorkerMessage = async (event: { data: unknown }): Promise<voi
   const input: unknown = event.data;
   const callbackAt = WORKER_CMD_LOG ? Date.now() : 0;
 
+  const linkedMissingVisibility = parseLinkedMissingVisibilityMessage(input);
+  if (linkedMissingVisibility) {
+    libraryService.setShowMissingLinkedFiles(linkedMissingVisibility.show);
+    return;
+  }
+
+  const thumbnailExtensions = parsePluginThumbnailExtensionsMessage(input);
+  if (thumbnailExtensions) {
+    libraryService.setPluginThumbnailExtensions(
+      thumbnailExtensions.libraryId,
+      thumbnailExtensions.extensions,
+    );
+    if (libraryService.hasOpenLibrary(thumbnailExtensions.libraryId)) {
+      libraryService.enqueueThumbnailJobs(thumbnailExtensions.libraryId);
+      scheduleThumbnailQueue(thumbnailExtensions.libraryId);
+    }
+    return;
+  }
+
   try {
     const providerResponse = parsePluginMediaProviderResponse(input);
     const pending = pendingPluginMediaProviderRequests.get(providerResponse.requestId);
@@ -3036,6 +3073,8 @@ const handleLibraryWorkerMessage = async (event: { data: unknown }): Promise<voi
       if (
         request.command.type === 'media.get-preview-artifact'
         || request.command.type === 'asset.text.read'
+        || request.command.type === 'asset.zip.list'
+        || request.command.type === 'asset.zip.read-entry'
         || request.command.type === 'media.get-source-path'
       ) {
         // Source paths are cheap control lookups; preview resolution is a

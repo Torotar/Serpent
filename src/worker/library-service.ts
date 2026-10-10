@@ -54,6 +54,18 @@ import {
   resolveFfprobePath,
   resolveOiiotoolPath,
 } from './binary-resolver';
+import {
+  durationSecondsFromProbeStdout,
+  VIDEO_POSTER_GENERATOR_TAG,
+  videoPosterGeneratorVersion,
+  videoPosterSeekSeconds,
+} from './video-poster-seek';
+import {
+  folderCoverAbsolutePath,
+  folderCoverMimeType,
+  installFolderCoverFile,
+  removeFolderCoverFile,
+} from './folder-custom-cover';
 import { hasPdfCompatibleIllustratorHeader } from './illustrator-ai-format';
 import {
   dominantColorMetrics,
@@ -892,6 +904,7 @@ import {
   ZipImportStreamError,
   type ZipArchiveManifest,
 } from './zip-import-stream';
+import { listZipArchiveFiles, readZipArchiveEntry } from './zip-archive-preview';
 import {
   defaultPinnedHttpTransport,
   type DnsLookup,
@@ -2985,6 +2998,19 @@ const PALETTE_SATURATION_SCHEMA_CHECKSUM = createHash('sha256')
   .update(PALETTE_SATURATION_SCHEMA_SQL)
   .digest('hex');
 
+const FOLDER_CUSTOM_COVER_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS folder_custom_covers (
+    library_id TEXT NOT NULL,
+    folder_key TEXT NOT NULL,
+    relative_name TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, folder_key)
+  );
+`;
+const FOLDER_CUSTOM_COVER_SCHEMA_CHECKSUM = createHash('sha256')
+  .update(FOLDER_CUSTOM_COVER_SCHEMA_SQL)
+  .digest('hex');
+
 const ENTITY_APPEARANCE_TABLES = [
   'managed_folders',
   'linked_folders',
@@ -3731,6 +3757,11 @@ export const MIGRATIONS = [
     version: 56,
     sql: PALETTE_SATURATION_SCHEMA_SQL,
     checksum: PALETTE_SATURATION_SCHEMA_CHECKSUM,
+  },
+  {
+    version: 57,
+    sql: FOLDER_CUSTOM_COVER_SCHEMA_SQL,
+    checksum: FOLDER_CUSTOM_COVER_SCHEMA_CHECKSUM,
   },
 ] as const;
 export const SUPPORTED_SCHEMA_VERSION = MIGRATIONS.at(-1)!.version;
@@ -15708,6 +15739,180 @@ export class LibraryService {
   }
 
   /**
+   * Copy a chosen image into the library and use it as the folder cover.
+   * Clearing removes that file and the folder goes back to its automatic cover.
+   */
+  setFolderCustomCovers(input: {
+    libraryId: string;
+    folderIds: readonly string[];
+    sourcePath: string;
+  }): { folderIds: string[]; hasCustomCover: true } {
+    const openLibrary = this.requireOpenLibrary(input.libraryId);
+    this.assertLibraryWritable(openLibrary);
+    const folderIds = [...new Set(input.folderIds)];
+    if (folderIds.length === 0) throw new LibraryServiceError('INVALID_SELECTION');
+    for (const folderId of folderIds) this.assertFolderCoverTarget(openLibrary, folderId);
+    const now = new Date().toISOString();
+    const previous = openLibrary.connection.prepare(
+      `SELECT relative_name FROM folder_custom_covers
+        WHERE library_id = ? AND folder_key = ?`,
+    );
+    const upsert = openLibrary.connection.prepare(
+      `INSERT INTO folder_custom_covers (library_id, folder_key, relative_name, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (library_id, folder_key) DO UPDATE SET
+         relative_name = excluded.relative_name,
+         updated_at = excluded.updated_at`,
+    );
+    try {
+      openLibrary.connection.transaction(() => {
+        for (const folderId of folderIds) {
+          const existing = previous.get(openLibrary.summary.libraryId, folderId) as
+            | { relative_name: string }
+            | undefined;
+          let relativeName: string;
+          try {
+            relativeName = installFolderCoverFile({
+              libraryPath: openLibrary.summary.libraryPath,
+              folderKey: folderId,
+              sourcePath: input.sourcePath,
+              previousRelativeName: existing?.relative_name,
+            });
+          } catch (error) {
+            const code = error instanceof Error ? error.message : '';
+            if (code === 'FOLDER_COVER_UNSUPPORTED' || code === 'FOLDER_COVER_NO_SPACE') {
+              throw new LibraryServiceError(code);
+            }
+            throw error;
+          }
+          upsert.run(openLibrary.summary.libraryId, folderId, relativeName, now);
+        }
+      })();
+    } catch (error) {
+      if (error instanceof LibraryServiceError) throw error;
+      throw new LibraryServiceError('LIBRARY_IO_ERROR', { cause: error });
+    }
+    return { folderIds, hasCustomCover: true };
+  }
+
+  clearFolderCustomCovers(input: {
+    libraryId: string;
+    folderIds: readonly string[];
+  }): { folderIds: string[]; hasCustomCover: false } {
+    const openLibrary = this.requireOpenLibrary(input.libraryId);
+    this.assertLibraryWritable(openLibrary);
+    const folderIds = [...new Set(input.folderIds)];
+    const select = openLibrary.connection.prepare(
+      `SELECT relative_name FROM folder_custom_covers
+        WHERE library_id = ? AND folder_key = ?`,
+    );
+    const remove = openLibrary.connection.prepare(
+      `DELETE FROM folder_custom_covers WHERE library_id = ? AND folder_key = ?`,
+    );
+    const libraryPath = openLibrary.summary.libraryPath;
+    openLibrary.connection.transaction(() => {
+      for (const folderId of folderIds) {
+        const row = select.get(openLibrary.summary.libraryId, folderId) as
+          | { relative_name: string }
+          | undefined;
+        remove.run(openLibrary.summary.libraryId, folderId);
+        if (row) removeFolderCoverFile(libraryPath, row.relative_name);
+      }
+    })();
+    return { folderIds, hasCustomCover: false };
+  }
+
+  resolveFolderCustomCover(input: {
+    libraryId: string;
+    folderId: string;
+  }): { absolutePath: string; mimeType: string } | null {
+    const openLibrary = this.requireOpenLibrary(input.libraryId);
+    const row = openLibrary.connection.prepare(
+      `SELECT relative_name FROM folder_custom_covers
+        WHERE library_id = ? AND folder_key = ?`,
+    ).get(openLibrary.summary.libraryId, input.folderId) as
+      | { relative_name: string }
+      | undefined;
+    if (!row) return null;
+    return {
+      absolutePath: folderCoverAbsolutePath(openLibrary.summary.libraryPath, row.relative_name),
+      mimeType: folderCoverMimeType(row.relative_name),
+    };
+  }
+
+  private folderCoverSwept = new WeakSet<OpenLibrary>();
+
+  private assertFolderCoverTarget(openLibrary: OpenLibrary, folderId: string): void {
+    const managed = openLibrary.connection
+      .prepare('SELECT 1 AS ok FROM managed_folders WHERE folder_id = ?')
+      .get(folderId);
+    if (managed) return;
+    const linked = openLibrary.connection
+      .prepare('SELECT 1 AS ok FROM linked_folders WHERE folder_id = ? AND library_id = ?')
+      .get(folderId, openLibrary.summary.libraryId);
+    if (linked) return;
+    const virtual = parseLinkedVirtualFolderId(folderId);
+    if (virtual) {
+      const root = openLibrary.connection
+        .prepare('SELECT 1 AS ok FROM linked_folders WHERE folder_id = ? AND library_id = ?')
+        .get(virtual.linkedFolderId, openLibrary.summary.libraryId);
+      if (root) return;
+    }
+    const trashed = openLibrary.connection
+      .prepare('SELECT 1 AS ok FROM trashed_managed_folders WHERE folder_id = ?')
+      .get(folderId);
+    if (trashed) return;
+    throw new LibraryServiceError('FOLDER_NOT_FOUND');
+  }
+
+  private sweepOrphanFolderCovers(openLibrary: OpenLibrary): void {
+    if (this.folderCoverSwept.has(openLibrary)) return;
+    if (!hasTable(openLibrary.connection, 'folder_custom_covers')) return;
+    this.folderCoverSwept.add(openLibrary);
+    const rows = openLibrary.connection.prepare(
+      `SELECT folder_key, relative_name FROM folder_custom_covers WHERE library_id = ?`,
+    ).all(openLibrary.summary.libraryId) as Array<{ folder_key: string; relative_name: string }>;
+    const remove = openLibrary.connection.prepare(
+      `DELETE FROM folder_custom_covers WHERE library_id = ? AND folder_key = ?`,
+    );
+    for (const row of rows) {
+      try {
+        this.assertFolderCoverTarget(openLibrary, row.folder_key);
+      } catch (error) {
+        if (!(error instanceof LibraryServiceError) || error.code !== 'FOLDER_NOT_FOUND') throw error;
+        remove.run(openLibrary.summary.libraryId, row.folder_key);
+        removeFolderCoverFile(openLibrary.summary.libraryPath, row.relative_name);
+      }
+    }
+  }
+
+  private withCustomFolderCovers(
+    openLibrary: OpenLibrary,
+    entries: FolderBrowseEntry[],
+  ): FolderBrowseEntry[] {
+    this.sweepOrphanFolderCovers(openLibrary);
+    if (entries.length === 0 || !hasTable(openLibrary.connection, 'folder_custom_covers')) {
+      return entries;
+    }
+    const rows = sqliteAllInChunks<string, { folder_key: string; updated_at: string }>({
+      connection: openLibrary.connection,
+      values: entries.map((entry) => entry.folderId),
+      buildSql: (placeholders) =>
+        `SELECT folder_key, updated_at FROM folder_custom_covers
+          WHERE library_id = ?
+            AND folder_key IN (${placeholders})`,
+      bind: (chunk) => [openLibrary.summary.libraryId, ...chunk],
+    });
+    if (rows.length === 0) return entries;
+    const tokens = new Map(rows.map((row) => [row.folder_key, row.updated_at]));
+    return entries.map((entry) => {
+      const token = tokens.get(entry.folderId);
+      if (!token) return entry;
+      return { ...entry, hasCustomCover: true, customCoverToken: token };
+    });
+  }
+
+  /**
    * Navigation badges only need a count. Keep them on a narrow COUNT query
    * instead of routing through searchAssets, which also builds a first page,
    * joins display metadata, and performs sequence/artifact enrichment. The
@@ -15724,6 +15929,7 @@ export class LibraryService {
     return countCatalogNavigationAssets(connection, {
       scope: input.scope,
       showIgnored: input.showIgnored,
+      showMissingLinked: this.#showMissingLinkedFiles,
       explicitIgnoreSql: this.explicitIgnoreSql(connection, 'a', input.showIgnored),
       hasLinkedIgnoredAssets: hasTable(connection, 'linked_ignored_assets'),
       hasSequenceFrames: hasTable(connection, 'asset_sequence_frames'),
@@ -15746,7 +15952,7 @@ export class LibraryService {
     const includeTrashedFolders = input.includeTrashedFolders === true;
     const changeSequence = this.getChangeSequence(input.libraryId);
     const browseChangeSequence = this.getBrowseChangeSequence(input.libraryId);
-    const key = `${browseChangeSequence}\u0000${showIgnored ? 'ignored' : 'visible'}\u0000${includeTrashedFolders ? 'trash-folders' : 'no-trash-folders'}`;
+    const key = `${browseChangeSequence}\u0000${showIgnored ? 'ignored' : 'visible'}\u0000${includeTrashedFolders ? 'trash-folders' : 'no-trash-folders'}\u0000${this.#showMissingLinkedFiles ? 'missing-linked' : 'hide-missing-linked'}`;
     const cached = openLibrary.navigationSummaryCache;
     if (cached?.key === key) {
       // The summary contents are governed by the narrow browse sequence. Keep
@@ -15811,7 +16017,7 @@ export class LibraryService {
     const includeTrashedFolders = input.includeTrashedFolders === true;
     const changeSequence = this.getChangeSequence(input.libraryId);
     const browseChangeSequence = this.getBrowseChangeSequence(input.libraryId);
-    const key = `${browseChangeSequence}\u0000${showIgnored ? 'ignored' : 'visible'}\u0000${includeTrashedFolders ? 'trash-folders' : 'no-trash-folders'}`;
+    const key = `${browseChangeSequence}\u0000${showIgnored ? 'ignored' : 'visible'}\u0000${includeTrashedFolders ? 'trash-folders' : 'no-trash-folders'}\u0000${this.#showMissingLinkedFiles ? 'missing-linked' : 'hide-missing-linked'}`;
     const cached = openLibrary.navigationSummaryCache;
     if (cached?.key === key) {
       return cached.value.changeSequence === changeSequence
@@ -16347,6 +16553,7 @@ export class LibraryService {
           WHERE a.linked_folder_id = ?
             AND a.location_kind = 'linked'
             AND a.deleted_at IS NULL
+            ${this.#showMissingLinkedFiles ? '' : "AND a.availability <> 'missing'"}
             ${hasIgnoreTable
               ? 'AND NOT EXISTS (SELECT 1 FROM linked_ignored_assets ignored WHERE ignored.asset_id = a.asset_id)'
               : ''}
@@ -16387,6 +16594,7 @@ export class LibraryService {
           WHERE a.linked_folder_id = ?
             AND a.location_kind = 'linked'
             AND a.deleted_at IS NULL
+            ${this.#showMissingLinkedFiles ? '' : "AND a.availability <> 'missing'"}
             AND ${this.explicitIgnoreSql(openLibrary.connection, 'a', showIgnored)}
             AND (
               ? = ''
@@ -16761,9 +16969,11 @@ export class LibraryService {
     openLibrary: OpenLibrary,
     entries: FolderBrowseEntry[],
   ): FolderBrowseEntry[] {
-    if (!hasTable(openLibrary.connection, 'asset_sequence_frames')) return entries;
+    if (!hasTable(openLibrary.connection, 'asset_sequence_frames')) {
+      return this.withCustomFolderCovers(openLibrary, entries);
+    }
     const pending = entries.filter((entry) => entry.coverArtifactIds.length === 0);
-    if (pending.length === 0) return entries;
+    if (pending.length === 0) return this.withCustomFolderCovers(openLibrary, entries);
     const previews = new Map<string, { assetId: string; revisionId: string }>();
     const managedIds = pending
       .filter((entry) => entry.locationKind === 'managed')
@@ -16845,12 +17055,12 @@ export class LibraryService {
         }
       }
     }
-    if (previews.size === 0) return entries;
-    return entries.map((entry) => {
+    if (previews.size === 0) return this.withCustomFolderCovers(openLibrary, entries);
+    return this.withCustomFolderCovers(openLibrary, entries.map((entry) => {
       const preview = previews.get(entry.folderId);
       if (!preview || entry.coverArtifactIds.length > 0) return entry;
       return { ...entry, coverSourcePreviews: [preview] };
-    });
+    }));
   }
 
   private folderCoverArtifactMap(
@@ -18759,7 +18969,10 @@ export class LibraryService {
         totalBytes,
         true,
       );
-      this.createDetectedImageSequences(openLibrary, importedAssetIds);
+      // A linked folder is the disk directory itself. Numbered frames stay as
+      // separate files, and content that already exists elsewhere in the
+      // library is still listed. Copy import is the path that asks about
+      // sequences and content duplicates.
       // Header probes stay on the visible-window / dimension-backfill lanes.
       // Watcher reconcile is optional here so the Worker RPC can return as soon
       // as the catalog is committed (GitHub #45): overlay and later commands
@@ -23076,6 +23289,29 @@ export class LibraryService {
       : 'other';
   }
 
+  readonly #pluginThumbnailExtensions = new Map<string, Set<string>>();
+
+  /** Extensions a thumbnail provider claimed for this library, without a leading dot. */
+  setPluginThumbnailExtensions(libraryId: string, extensions: readonly string[]): void {
+    const normalized = new Set<string>();
+    for (const value of extensions) {
+      const extension = value.trim().replace(/^\./u, '').toLowerCase();
+      if (/^[a-z0-9][a-z0-9+_-]*$/u.test(extension)) normalized.add(extension);
+    }
+    this.#pluginThumbnailExtensions.set(libraryId, normalized);
+  }
+
+  private claimsPluginThumbnail(libraryId: string, relativePath: string): boolean {
+    const extension = path.extname(relativePath).slice(1).toLowerCase();
+    return extension.length > 0
+      && (this.#pluginThumbnailExtensions.get(libraryId)?.has(extension) ?? false);
+  }
+
+  private thumbnailEligible(libraryId: string, relativePath: string): boolean {
+    return this.claimsPluginThumbnail(libraryId, relativePath)
+      || LibraryService.supportsThumbnail(relativePath);
+  }
+
   static supportsThumbnail(filename: string): boolean {
     return assetSupportsThumbnail({
       mediaType: LibraryService.toSummaryMediaType(
@@ -25096,7 +25332,7 @@ export class LibraryService {
         )
         .run(now, existing.current_revision_id);
       if (
-        LibraryService.supportsThumbnail(existing.relative_file_path)
+        this.thumbnailEligible(libraryId, existing.relative_file_path)
         && !this.isExplicitlyIgnored(
           openLibrary,
           existing.location_kind,
@@ -26242,15 +26478,17 @@ export class LibraryService {
     mkdirSync(artifactsDir, { recursive: true });
 
     let posterArtifactId: string | null = null;
+    let durationSec: number | null = null;
 
     if (includeMetadata) {
       // Direct callers retain the historical all-in-one behavior. The queue
       // deliberately keeps this out of the poster job so AI can proceed
       // without waiting for the card preview.
       try {
-        await this.probeVideoAsset(
+        const probed = await this.probeVideoAsset(
           input, openLibrary, assetPath, revisionId, ffprobePath, execution,
         );
+        durationSec = probed.durationSec > 0 ? probed.durationSec : null;
       } catch (error) {
         const resourceError = asMediaResourceExhaustedError(error, 'ffprobe');
         if (resourceError) throw resourceError;
@@ -26262,7 +26500,8 @@ export class LibraryService {
     // 2. Video poster
     try {
       posterArtifactId = await this.generateVideoPoster(
-        input, openLibrary, assetPath, revisionId, ffmpegPath, artifactsDir, execution,
+        input, openLibrary, assetPath, revisionId, ffmpegPath, ffprobePath,
+        artifactsDir, execution, durationSec,
       );
     } catch (error) {
       const resourceError = asMediaResourceExhaustedError(error, 'ffmpeg-video-poster');
@@ -27550,19 +27789,49 @@ export class LibraryService {
     }
   }
 
-  /** Generate a video poster frame using ffmpeg thumbnail filter. */
+  private async probeVideoDurationSeconds(
+    ffprobePath: string,
+    assetPath: string,
+    execution: MediaExecutionContext,
+  ): Promise<number | null> {
+    try {
+      const result = await this.runFfmpeg(ffprobePath, [
+        '-v', 'error',
+        '-show_entries', 'format=duration:stream=codec_type,duration',
+        '-select_streams', 'v:0',
+        '-of', 'json',
+        assetPath,
+      ], { signal: execution.signal });
+      if (result.exitCode !== 0) return null;
+      return durationSecondsFromProbeStdout(result.stdout.toString('utf-8'));
+    } catch (error) {
+      const resourceError = asMediaResourceExhaustedError(error, 'ffprobe-video-duration');
+      if (resourceError) throw resourceError;
+      return null;
+    }
+  }
+
+  /** Grab one poster frame at 30% of the duration. */
   private async generateVideoPoster(
     input: { libraryId: string; assetId: string },
     openLibrary: OpenLibrary,
     assetPath: string,
     revisionId: string,
     ffmpegPath: string,
+    ffprobePath: string,
     artifactsDir: string,
     execution: MediaExecutionContext,
+    knownDurationSec: number | null,
   ): Promise<string> {
     const artifactId = randomUUID();
     const artifactRelPath = `${artifactId}.jpg`;
     const artifactAbsPath = path.join(artifactsDir, artifactRelPath);
+    const durationSec = knownDurationSec ?? await this.probeVideoDurationSeconds(
+      ffprobePath,
+      assetPath,
+      execution,
+    );
+    const seekSeconds = durationSec === null ? null : videoPosterSeekSeconds(durationSec);
 
     try {
       const result = await this.runFfmpeg(ffmpegPath, [
@@ -27571,6 +27840,9 @@ export class LibraryService {
         '-loglevel', 'error',
         '-threads:v', '1',
         '-filter_threads', '1',
+        // Input seek jumps to a nearby keyframe. Output seek would decode
+        // every frame from the start up to 30% of a long file.
+        ...(seekSeconds === null ? [] : ['-ss', seekSeconds.toFixed(3)]),
         '-i', assetPath,
         // Do not let FFmpeg auto-select audio, subtitles, or data streams for
         // a one-frame image output. Those streams are irrelevant to a card
@@ -27579,11 +27851,9 @@ export class LibraryService {
         '-an',
         '-sn',
         '-dn',
-        // Scale before thumbnail so FFmpeg retains small frames rather than
-        // hundreds of full-resolution decoded frames. A small batch is
-        // sufficient for a fast card poster; visual quality is intentionally
-        // secondary to keeping import and browsing responsive.
-        '-vf', 'scale=640:-2:force_original_aspect_ratio=decrease,thumbnail=30',
+        // One scaled frame. Do not run thumbnail=N: that filter only ranks
+        // the next N frames after the start, which is the opening shot.
+        '-vf', 'scale=640:-2:force_original_aspect_ratio=decrease',
         '-frames:v', '1',
         '-q:v', '3',
         artifactAbsPath,
@@ -27602,7 +27872,7 @@ export class LibraryService {
            VALUES (?, ?, 'video_poster', 'image/jpeg', ?, ?, ?, 'ready', ?)`,
         )
         .run(artifactId, revisionId, outputStat.size, artifactRelPath,
-          `ffmpeg@${FFMPEG_VERSION}`, new Date().toISOString());
+          videoPosterGeneratorVersion(FFMPEG_VERSION), new Date().toISOString());
 
       return artifactId;
     } catch (error) {
@@ -27611,7 +27881,7 @@ export class LibraryService {
         throw error;
       }
       this.writeFailedArtifact(openLibrary, artifactId, revisionId, 'video_poster',
-        'image/jpeg', artifactRelPath, `ffmpeg@${FFMPEG_VERSION}`, error);
+        'image/jpeg', artifactRelPath, videoPosterGeneratorVersion(FFMPEG_VERSION), error);
       throw error;
     }
   }
@@ -31395,7 +31665,8 @@ export class LibraryService {
     if (kind === 'video_poster') {
       return mediaType === 'audio'
         ? generatorVersion.includes(AUDIO_WAVEFORM_COVER_GENERATOR_TAG)
-        : generatorVersion.startsWith(`ffmpeg@${FFMPEG_VERSION}`);
+        : generatorVersion.startsWith(`ffmpeg@${FFMPEG_VERSION}`)
+          && generatorVersion.includes(VIDEO_POSTER_GENERATOR_TAG);
     }
     switch (mediaType) {
       case 'image': {
@@ -31736,6 +32007,9 @@ export class LibraryService {
       // Serpent-485aeb: font cards render a real sample line offscreen in Main.
       ...FONT_EXTENSIONS.map((extension) => extension.slice(1)),
     ];
+    for (const extension of this.#pluginThumbnailExtensions.get(libraryId) ?? []) {
+      if (!supportedExtensions.includes(extension)) supportedExtensions.push(extension);
+    }
     const videoExtensions = VIDEO_EXTENSIONS.map((extension) => extension.slice(1));
     const nowInvalidate = new Date().toISOString();
     if (options.skipStaleRepair) {
@@ -32058,7 +32332,11 @@ export class LibraryService {
 
     for (const row of rows) {
       if (!schedulableIds.has(row.asset_id)) continue;
-      const mediaType = LibraryService.detectMediaType(row.relative_file_path);
+      const detectedMediaType = LibraryService.detectMediaType(row.relative_file_path);
+      const mediaType = detectedMediaType === 'other'
+        && this.claimsPluginThumbnail(libraryId, row.relative_file_path)
+        ? 'image'
+        : detectedMediaType;
       const sourceDirect = isSourceDirectPreview({
         fileName: row.relative_file_path,
         mediaType: LibraryService.toSummaryMediaType(mediaType),
@@ -32802,9 +33080,16 @@ export class LibraryService {
           source_width: number | null;
           source_height: number | null;
         } | undefined;
-      const claimMediaType = claimAsset
+      const detectedClaimMediaType = claimAsset
         ? LibraryService.detectMediaType(claimAsset.relative_file_path)
         : 'other';
+      // Plugin-owned formats stay `other` for the viewer and native decoders.
+      // Admission still needs an image thumbnail role so the provider can run.
+      const claimMediaType = claimAsset
+        && detectedClaimMediaType === 'other'
+        && this.claimsPluginThumbnail(libraryId, claimAsset.relative_file_path)
+        ? 'image'
+        : detectedClaimMediaType;
       const claimSourceDirect = claimAsset
         ? isSourceDirectPreview({
             fileName: claimAsset.relative_file_path,
@@ -33500,6 +33785,13 @@ export class LibraryService {
    * same stable order. Keep this narrow: filters, folders, collections and
    * explicit sorts each have their own semantics and must use the SQL path.
    */
+  /** Linked assets with availability `missing` stay in browse until this is false. */
+  #showMissingLinkedFiles = true;
+
+  setShowMissingLinkedFiles(show: boolean): void {
+    this.#showMissingLinkedFiles = show;
+  }
+
   private isDefaultBrowseIndexRequest(input: {
     query?: { clauses: SearchClause[]; groups?: SearchGroup[] } | null;
     filters?: FilterClause[] | null;
@@ -33509,7 +33801,7 @@ export class LibraryService {
     idsOnly?: boolean | null;
     showIgnored?: boolean;
   }): boolean {
-    return isDefaultCatalogBrowseIndexRequest(input);
+    return this.#showMissingLinkedFiles && isDefaultCatalogBrowseIndexRequest(input);
   }
 
   private buildFilterWhere(
@@ -33567,6 +33859,7 @@ export class LibraryService {
       scope: input.scope ?? null,
       sort,
       showIgnored: input.showIgnored === true,
+      showMissingLinked: this.#showMissingLinkedFiles,
     };
     // PERF2-04 / Serpent-52eed4: paint the bounded first window before enumerating
     // every id. Full-scope idsOnly on a network library occupied the only
@@ -34059,6 +34352,7 @@ export class LibraryService {
       whereParts.push(...buildCatalogAssetVisibilityPredicates({
         scopeKind: input.scope?.kind === 'trash' ? 'trash' : 'all',
         showIgnored: input.showIgnored === true,
+        showMissingLinked: this.#showMissingLinkedFiles,
         explicitIgnoreSql: this.explicitIgnoreSql(connection, 'a', input.showIgnored === true),
         hasLinkedIgnoredAssets: hasIgnoreTable,
         hasSequenceFrames,
@@ -36345,6 +36639,97 @@ export class LibraryService {
     }
   }
 
+  zipAssetAbsolutePath(input: { libraryId: string; assetId: string }): {
+    absolutePath: string;
+    revisionId: string;
+  } {
+    const openLibrary = this.requireOpenLibrary(input.libraryId);
+    const row = openLibrary.connection
+      .prepare(
+        `SELECT asset_id, relative_file_path, current_revision_id,
+                availability, deleted_at
+           FROM assets WHERE asset_id = ?`,
+      )
+      .get(input.assetId) as {
+        asset_id: string;
+        relative_file_path: string;
+        current_revision_id: string | null;
+        availability: 'available' | 'missing';
+        deleted_at: string | null;
+      } | undefined;
+    if (!row?.current_revision_id) {
+      throw new LibraryServiceError('ASSET_NOT_FOUND', { reason: 'SOURCE_NOT_FOUND' });
+    }
+    const isTrashed = row.deleted_at !== null;
+    if (!isTrashed && row.availability !== 'available') {
+      throw new LibraryServiceError('ASSET_NOT_FOUND', { reason: 'SOURCE_NOT_FOUND' });
+    }
+    if (path.extname(row.relative_file_path).toLowerCase() !== '.zip') {
+      throw new LibraryServiceError('UNSUPPORTED_MEDIA_TYPE');
+    }
+    const absolutePath = isTrashed
+      ? this.trashPath(
+          openLibrary,
+          row.asset_id,
+          path.posix.basename(row.relative_file_path),
+        )
+      : this.resolveAssetPath(input.libraryId, input.assetId);
+    return { absolutePath, revisionId: row.current_revision_id };
+  }
+
+  async listZipEntries(input: { libraryId: string; assetId: string }): Promise<{
+    assetId: string;
+    revisionId: string;
+    status: 'ready' | 'unreadable';
+    truncated: boolean;
+    files: Array<{ index: number; name: string; uncompressedSize: number }>;
+  }> {
+    const located = this.zipAssetAbsolutePath(input);
+    try {
+      const listing = await listZipArchiveFiles(located.absolutePath);
+      return {
+        assetId: input.assetId,
+        revisionId: located.revisionId,
+        status: listing.status,
+        truncated: listing.truncated,
+        files: listing.files,
+      };
+    } catch {
+      return {
+        assetId: input.assetId,
+        revisionId: located.revisionId,
+        status: 'unreadable',
+        truncated: false,
+        files: [],
+      };
+    }
+  }
+
+  async readZipEntry(input: { libraryId: string; assetId: string; index: number }): Promise<{
+    assetId: string;
+    index: number;
+    name: string;
+    uncompressedSize: number;
+    kind: 'image' | 'text' | 'unavailable';
+    mimeType?: string;
+    bytesBase64?: string;
+    text?: string;
+    truncated?: boolean;
+  }> {
+    const located = this.zipAssetAbsolutePath(input);
+    const entry = await readZipArchiveEntry(located.absolutePath, input.index);
+    if (!entry) {
+      return {
+        assetId: input.assetId,
+        index: input.index,
+        name: 'entry',
+        uncompressedSize: 0,
+        kind: 'unavailable',
+      };
+    }
+    return { assetId: input.assetId, index: input.index, ...entry };
+  }
+
   readTextAsset(input: {
     libraryId: string;
     assetId: string;
@@ -36918,7 +37303,7 @@ export class LibraryService {
       this.syncAssetSearchContent(openLibrary.connection, input.assetId);
     })();
 
-    if (LibraryService.supportsThumbnail(row.relative_file_path)) {
+    if (this.thumbnailEligible(input.libraryId, row.relative_file_path)) {
       this.enqueueThumbnailJobs(input.libraryId, {
         assetIds: [input.assetId],
         priority: 300,
@@ -45800,7 +46185,7 @@ export class LibraryService {
         existingManagedIdentities.set(pathIdentity, assetId);
         this.syncAssetSearchContent(openLibrary.connection, assetId);
         discoveredAssetIds.push(assetId);
-        if (LibraryService.supportsThumbnail(entry.relativePath)) {
+        if (this.thumbnailEligible(openLibrary.summary.libraryId, entry.relativePath)) {
           openLibrary.connection
             .prepare(
               `INSERT OR IGNORE INTO jobs
@@ -45970,7 +46355,7 @@ export class LibraryService {
               asset.asset_id,
             );
           if (
-            LibraryService.supportsThumbnail(currentRelativePath)
+            this.thumbnailEligible(openLibrary.summary.libraryId, currentRelativePath)
             && !this.isExplicitlyIgnored(
               openLibrary,
               asset.location_kind,
@@ -46092,7 +46477,7 @@ export class LibraryService {
           // Enqueue only decodable media; unsupported assets keep their normal
           // file icon and never churn through a permanently failing queue.
           if (
-            LibraryService.supportsThumbnail(currentRelativePath)
+            this.thumbnailEligible(openLibrary.summary.libraryId, currentRelativePath)
             && !this.isExplicitlyIgnored(
               openLibrary,
               asset.location_kind,

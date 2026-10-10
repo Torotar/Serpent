@@ -282,6 +282,16 @@ export const rendererRequestSchema = z.discriminatedUnion('type', [
     target: entityAppearanceTargetSchema,
     appearance: entityAppearanceSchema,
   }),
+  z.strictObject({
+    type: z.literal('folder.cover.set.request'),
+    libraryId: identifierSchema,
+    folderIds: z.array(folderScopeIdSchema).min(1).max(100),
+  }),
+  z.strictObject({
+    type: z.literal('folder.cover.clear.request'),
+    libraryId: identifierSchema,
+    folderIds: z.array(folderScopeIdSchema).min(1).max(100),
+  }),
   // Folder shell actions (REQ-MENU-006) are identified by folder id only; no
   // filesystem path may cross this boundary (REQ-COMMAND-003). The Worker
   // resolves the absolute path and Main performs the shell/clipboard action.
@@ -933,6 +943,17 @@ export const rendererRequestSchema = z.discriminatedUnion('type', [
     }
   }),
   z.strictObject({
+    type: z.literal('asset.zip.list.request'),
+    libraryId: identifierSchema,
+    assetId: identifierSchema,
+  }),
+  z.strictObject({
+    type: z.literal('asset.zip.read-entry.request'),
+    libraryId: identifierSchema,
+    assetId: identifierSchema,
+    index: z.number().int().nonnegative().max(20_000),
+  }),
+  z.strictObject({
     type: z.literal('asset.text.read.request'),
     libraryId: identifierSchema,
     assetId: identifierSchema,
@@ -1526,6 +1547,22 @@ export const workerCommandSchema = z.discriminatedUnion('type', [
     libraryId: identifierSchema,
     target: entityAppearanceTargetSchema,
     appearance: entityAppearanceSchema,
+  }),
+  z.strictObject({
+    type: z.literal('folder.cover.set'),
+    libraryId: identifierSchema,
+    folderIds: z.array(folderScopeIdSchema).min(1).max(100),
+    sourcePath: selectedPathSchema,
+  }),
+  z.strictObject({
+    type: z.literal('folder.cover.clear'),
+    libraryId: identifierSchema,
+    folderIds: z.array(folderScopeIdSchema).min(1).max(100),
+  }),
+  z.strictObject({
+    type: z.literal('folder.cover.resolve'),
+    libraryId: identifierSchema,
+    folderId: folderScopeIdSchema,
   }),
   z.strictObject({
     type: z.literal('folder.clone'),
@@ -2218,6 +2255,17 @@ export const workerCommandSchema = z.discriminatedUnion('type', [
     libraryId: identifierSchema,
     days: z.number().int().min(1).max(3_650).default(2),
     limit: z.number().int().min(1).max(24).default(12),
+  }),
+  z.strictObject({
+    type: z.literal('asset.zip.list'),
+    libraryId: identifierSchema,
+    assetId: identifierSchema,
+  }),
+  z.strictObject({
+    type: z.literal('asset.zip.read-entry'),
+    libraryId: identifierSchema,
+    assetId: identifierSchema,
+    index: z.number().int().nonnegative().max(20_000),
   }),
   z.strictObject({
     type: z.literal('asset.text.read'),

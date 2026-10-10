@@ -182,6 +182,8 @@ const MUTATION_COMMANDS = new Set([
   'folder.create',
   'folder.rename',
   'appearance.set',
+  'folder.cover.set',
+  'folder.cover.clear',
   'folder.move',
   'folder.trash',
   'folder.delete-empty',
@@ -234,6 +236,8 @@ const MUTATION_COMMANDS = new Set([
 
 const VIEWER_UPGRADE_COMMANDS = new Set([
   'asset.preview',
+  'asset.zip.list',
+  'asset.zip.read-entry',
   'asset.text.read',
   'asset.content.read',
   // Resolving a preview may invoke a plugin, decode RAW/OIIO/ICO, inspect
@@ -306,6 +310,7 @@ const BACKGROUND_PRIMARY_COMMANDS = new Set([
   'media.get-artifact-paths',
   'media.get-thumbnail-artifact',
   'media.get-source-path',
+  'folder.cover.resolve',
   'media.resolve-asset-paths',
   'media.get-asset-path',
   'media.get-asset-paths',
@@ -367,6 +372,8 @@ export function performanceInteractionKeyForCommand(command: WorkerCommandLike):
     case 'asset.preview': return `viewer:${command.assetId}`;
     case 'media.get-preview-artifact': return `preview:${command.assetId}`;
     case 'media.get-source-path': return `source:${command.assetId}`;
+    case 'asset.zip.list': return `zip:${command.assetId}`;
+    case 'asset.zip.read-entry': return `zip-entry:${command.assetId}`;
     case 'asset.text.read': return `text:${command.assetId}`;
     case 'asset.content.read': return `content:${command.assetId}`;
     default: return undefined;
@@ -406,6 +413,7 @@ const NON_PREEMPTIVE_MEDIA_COMMANDS = new Set([
   'media.get-artifact-paths',
   'media.get-thumbnail-artifact',
   'media.get-source-path',
+  'folder.cover.resolve',
   'media.resolve-asset-paths',
   'media.get-asset-path',
   'media.get-asset-paths',
