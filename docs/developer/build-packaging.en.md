@@ -40,10 +40,10 @@ Phases: `verify` → `media` → `package` → `e2e` → `make` → `checksums`
 | Phase | What it does |
 | --- | --- |
 | verify | `rebuild:native` + `verify:mainline` (same gates as CI) |
-| media | download the controlled media bundle (`media:acquire`) + verify |
+| media | download the controlled media bundle (`media:acquire`) + verify; **linux-x64 matches macOS/Windows** (linux-arm64 is still skipped) |
 | package | `electron-forge package` + `verify:package` |
 | e2e | packaged startup tests (`test:e2e:packaged`) |
-| make | build installers |
+| make | build installers (Linux: prefer `make:appimage:docker`, rename to `Serpent-linux-x86-64-<ver>.AppImage`) |
 | checksums | SHA-256 manifests (versioned header) |
 
 Skip slow phases with `--skip-verify` / `--skip-media` / `--skip-e2e`. Run one phase with `npm run release:<phase>` (the e2e phase is `npm run release:e2e:packaged`).
@@ -83,7 +83,20 @@ npm run release:local -- --skip-verify --build-media-locally
 
 ### Platforms
 
-`forge.config.ts` enforces **native-platform builds** (allowlist `darwin-arm64` / `win32-x64`) — media binaries, ufbx and native modules are platform-specific; cross-packaging is not supported. Windows runs the same pipeline on a Windows host.
+`forge.config.ts` enforces **native-platform builds** — the pinned-media allowlist is `darwin-arm64` / `win32-x64` / `linux-x64`; Linux must also be packaged on a Linux host (or inside `make:appimage:docker`). Cross-packaging is not supported. Each platform runs the same release pipeline locally.
+
+### Linux AppImage
+
+```bash
+npm run make:appimage           # host → out/make/appimage/Serpent-<ver>-x86_64.AppImage
+npm run make:appimage:docker    # Ubuntu 22.04 / glibc 2.35 baseline (preferred for release)
+npm run release:make            # prefers docker and renames to Serpent-linux-x86-64-<ver>.AppImage
+```
+
+- linux-x64 ships the same pinned media bundle as macOS/Windows (`ffmpeg` / `ffprobe` / `oiiotool`). That platform is currently `ready` in `bundle-lock.json`. `package` runs `media:ensure` in `prePackage`. If the lock returns to an unpromoted state, build `scripts/media-build/linux-x64.sh` on Linux x86_64, upload `artifacts/media-binaries/serpent-media-linux-x64.zip` to the Serpent-Build release, and write the URL plus SHA-256 back into `bundle-lock.json`. Local trials can set `SERPENT_MEDIA_SKIP_PROVENANCE=1`.
+- linux-arm64 still has no pinned bundle.
+- Needs FUSE (`libfuse2`); without FUSE use `--appimage-extract-and-run`.
+- Release upload name matches the in-app updater: `Serpent-linux-x86-64-<ver>.AppImage` (plus a sibling `.sha256`).
 
 ### Windows installer (Inno Setup)
 
@@ -124,7 +137,8 @@ SHA-256); main-repo `release:media` downloads and verifies them:
    - `ffmpeg/ffprobe`: BtbN LGPL builds (`registry.npmmirror.com/-/binary/ffmpeg-builds/`
      `ffmpeg-<ver>-win32-x64-lgpl.tar.xz`, or the macOS variant), LGPL-only (no GPL markers)
    - `oiiotool`: `scripts/media-build/build-oiiotool-win32.ps1` (Windows) /
-     `darwin-arm64.sh` (macOS) — vcpkg build (pinned toolchain + registry commit)
+     `darwin-arm64.sh` (macOS) / `linux-x64.sh` (Linux x86_64, together with FFmpeg)
+     — vcpkg build (pinned toolchain + registry commit)
 2. **Package and upload**:
    ```bash
    # assemble zip (platform layer ffmpeg/<platform>/…) + sha256
@@ -160,7 +174,7 @@ npm run extension:build   # builds dist/extension
 2. **Windows native validation**: same pipeline on a Windows host + install/uninstall journey
 3. **Signing upgrade**: SignPath application / Apple Developer account
 4. **CI/CD**: local CICD (2026-08-09 decision: main repo dropped GitHub Actions;
-   each platform runs `npm run release:local`; the browser-extension repo keeps
+   each target platform runs `npm run release:local`; the browser-extension repo keeps
    Actions for release publishing). See [local CICD](https://github.com/dolag233/Serpent/blob/dev/docs/internal/development/local-cicd.md).
 
 See the research doc for details.
