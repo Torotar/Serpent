@@ -2468,11 +2468,17 @@ body.platform-darwin .app-shell.left-collapsed .toolbar-workspace-cluster {
   color: var(--text);
 }
 
-/* Serpent-d7acfa：侧栏 Ctrl/⌘ 多选的行。沿用与拖放目标相同的「accent 轻染 +
-   inset 细环」语言，但更轻，避免与当前浏览范围的 is-active 混淆。 */
+/* Serpent-d7acfa：侧栏 Ctrl/⌘ 多选的行。沿用与拖放目标相同的「accent 轻染」
+   语言，但更轻，避免与当前浏览范围的 is-active 混淆。用户 2026-10-17：选中态
+   不要描边，只用背景色区分。取值挂在 .navigation-pane 上：islands 布局把同一条
+   高亮矩形画在行容器 .nav-tree-row（见文末 sidebar 状态矩形一节），两处必须用
+   同一组颜色。 */
+.navigation-pane {
+  --nav-selected-wash: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
 .nav-row.is-multi-selected {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--nav-selected-wash);
   color: var(--text);
 }
 
@@ -17085,6 +17091,37 @@ html.serpent-window-square .window-edge-resize-layer.is-disabled {
 .app-shell[data-shell-layout="islands"] .nav-row.is-active .nav-entity-glyph,
 .app-shell[data-shell-layout="islands"] .nav-row.is-active .icon {
   color: var(--ui-content-primary);
+}
+
+/* ---- Sidebar row states share ONE highlight rectangle ---------------------
+   当前浏览范围（.is-active）、悬停、多选、资产拖放目标全都画在行容器
+   .nav-tree-row 上。四种状态曾分别画在行容器与内层 .nav-row 按钮上，而按钮被
+   展开箭头列 + 层级缩进往右推，于是同一条行出现两种宽度（选中/悬停比当前文件夹
+   短一截）。现在行容器是唯一的高亮面，按钮本身永远透明。
+
+   用户 2026-10-17：选中态不要描边，只用背景色；既在浏览又被选中时仍显示选中的
+   accent 轻染（中性 .is-active 底色不得把它盖掉）。 */
+.app-shell[data-shell-layout="islands"] .nav-tree-row:has(> .nav-row:hover:not(:disabled):not(.is-active):not(.is-multi-selected):not(.is-drop-target)) {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.app-shell[data-shell-layout="islands"] .nav-tree-row:has(> .nav-row.is-multi-selected) {
+  background: var(--nav-selected-wash);
+}
+
+.app-shell[data-shell-layout="islands"] .nav-tree-row:has(> .nav-row.is-drop-target) {
+  background: color-mix(in srgb, var(--accent) 20%, var(--active));
+}
+
+/* 行的所有状态底色都由 .nav-tree-row 提供；按钮自己再画一层就会在同一条行里
+   叠出第二条更窄的高亮（悬停时最明显）。 */
+.app-shell[data-shell-layout="islands"] .nav-tree-row > .nav-row,
+.app-shell[data-shell-layout="islands"] .nav-tree-row > .nav-row:hover:not(:disabled),
+.app-shell[data-shell-layout="islands"] .nav-tree-row > .nav-row.is-active,
+.app-shell[data-shell-layout="islands"] .nav-tree-row > .nav-row.is-multi-selected,
+.app-shell[data-shell-layout="islands"] .nav-tree-row > .nav-row.is-drop-target {
+  background: transparent;
+  box-shadow: none;
 }
 
 /* Unified dense toolstrip: title + filters on ONE row (bold a28) */
