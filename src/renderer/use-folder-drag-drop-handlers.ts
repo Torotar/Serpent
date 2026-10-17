@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 
 import type { ManagedFolderSummary } from '../shared/asset-types';
 import type { SerpentLibraryApi } from '../shared/library-api';
@@ -39,6 +39,9 @@ export function useFolderDragDropHandlers({
 }: UseFolderDragDropHandlersParams) {
   const t = useT();
   const { locale } = useLocale();
+  // A sidebar reorder is deliberately non-blocking; keep a second drop from
+  // racing the first while its disk move and navigation refresh are in flight.
+  const moveInFlightRef = useRef(false);
 
   const folderFacts = useCallback(
     (): FolderDragFact[] =>
@@ -50,8 +53,13 @@ export function useFolderDragDropHandlers({
   );
 
   const handleFoldersDroppedOnFolder = useCallback(
-    (targetFolderId: string | null, draggedFolderIds: readonly string[]) => {
+    (
+      targetFolderId: string | null,
+      draggedFolderIds: readonly string[],
+      options?: { blockingUi?: boolean },
+    ) => {
       if (!api || !libraryId) return;
+      if (moveInFlightRef.current) return;
       const resolution = resolveFolderOntoFolderDrop({
         targetFolderId,
         draggedFolderIds,
@@ -66,8 +74,10 @@ export function useFolderDragDropHandlers({
         // 「不能将文件夹移动到自身。」属冗余提示。)
         return;
       }
+      const blockingUi = options?.blockingUi ?? true;
+      moveInFlightRef.current = true;
       void (async () => {
-        setUiState('loading');
+        if (blockingUi) setUiState('loading');
         try {
           const result = await api.moveFolders({
             libraryId,
@@ -94,7 +104,8 @@ export function useFolderDragDropHandlers({
         } catch (caught) {
           setError(toMessage(caught, t('toast.folderMoveFailed'), locale));
         } finally {
-          setUiState('ready');
+          moveInFlightRef.current = false;
+          if (blockingUi) setUiState('ready');
         }
       })();
     },

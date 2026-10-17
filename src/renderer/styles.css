@@ -2410,12 +2410,52 @@ body.platform-darwin .app-shell.left-collapsed .toolbar-workspace-cluster {
 }
 
 .nav-tree-row {
+  position: relative;
   display: grid;
   width: 100%;
   min-width: 0;
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 2px;
+}
+
+/* Custom folder order drag insertion line (folder "自定义" sort). */
+.nav-folder-insert-line {
+  position: absolute;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.nav-tree-row[data-insert-edge="before"] .nav-folder-insert-line {
+  top: -1px;
+}
+
+.nav-tree-row[data-insert-edge="after"] .nav-folder-insert-line {
+  bottom: -1px;
+}
+
+.nav-folder-insert-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+
+.nav-tree-row[data-insert-edge="before"] .nav-folder-insert-line::before {
+  top: -5px;
+  border-bottom: 6px solid var(--accent);
+}
+
+.nav-tree-row[data-insert-edge="after"] .nav-folder-insert-line::before {
+  bottom: -5px;
+  border-top: 6px solid var(--accent);
 }
 
 .nav-disclosure,

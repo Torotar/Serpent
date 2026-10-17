@@ -218,6 +218,7 @@ export const en = {
     sortByName: "By name",
     sortByCreated: "By date",
     sortByCount: "By file count",
+    sortByCustom: "Custom",
     sortDirection: "Direction",
     sortAsc: "Ascending",
     sortDesc: "Descending",

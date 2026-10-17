@@ -206,6 +206,7 @@ export const zhCN = {
     sortByName: "按字母",
     sortByCreated: "按时间",
     sortByCount: "按文件数量",
+    sortByCustom: "自定义",
     sortDirection: "排序方向",
     sortAsc: "升序",
     sortDesc: "降序",

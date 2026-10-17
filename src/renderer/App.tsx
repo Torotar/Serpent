@@ -7327,7 +7327,10 @@ function AppInner() {
     }
   }
 
-  async function moveCollectionToRoot(collectionId: string) {
+  async function moveCollectionToRoot(
+    collectionId: string,
+    options?: { blockingUi?: boolean },
+  ) {
     if (!api || !library) return;
     const source = collections.find(
       (collection) => collection.collectionId === collectionId,
@@ -7336,8 +7339,9 @@ function AppInner() {
     const targetLibraryId = library.libraryId;
     const viewSession = ensureLibraryView(targetLibraryId);
     if (!viewSession) return;
+    const blockingUi = options?.blockingUi ?? true;
     setDraggedCollectionId(null);
-    setUiState("loading");
+    if (blockingUi) setUiState("loading");
     try {
       const moved = await api.updateCollection({
         libraryId: targetLibraryId,
@@ -7359,11 +7363,15 @@ function AppInner() {
         setError(toMessage(caught, t("toast.collectionReorderFailed"), locale));
       }
     } finally {
-      if (isCurrentLibraryView(viewSession)) setUiState("ready");
+      if (blockingUi && isCurrentLibraryView(viewSession)) setUiState("ready");
     }
   }
 
-  async function nestCollectionUnder(sourceId: string, targetId: string) {
+  async function nestCollectionUnder(
+    sourceId: string,
+    targetId: string,
+    options?: { blockingUi?: boolean },
+  ) {
     if (!api || !library || sourceId === targetId) return;
     const source = collections.find(
       (collection) => collection.collectionId === sourceId,
@@ -7375,8 +7383,9 @@ function AppInner() {
     const targetLibraryId = library.libraryId;
     const viewSession = ensureLibraryView(targetLibraryId);
     if (!viewSession) return;
+    const blockingUi = options?.blockingUi ?? true;
     setDraggedCollectionId(null);
-    setUiState("loading");
+    if (blockingUi) setUiState("loading");
     try {
       const moved = await api.updateCollection({
         libraryId: targetLibraryId,
@@ -7398,7 +7407,7 @@ function AppInner() {
         setError(toMessage(caught, t("toast.collectionNestFailed"), locale));
       }
     } finally {
-      if (isCurrentLibraryView(viewSession)) setUiState("ready");
+      if (blockingUi && isCurrentLibraryView(viewSession)) setUiState("ready");
     }
   }
 
@@ -14081,11 +14090,11 @@ function AppInner() {
         }
         onInlineSmartCollectionEditCancel={cancelInlineSmartCollectionEdit}
         onOpenContextMenu={openContextMenu}
-        onNestCollection={(sourceId, targetId) =>
-          void nestCollectionUnder(sourceId, targetId)
+        onNestCollection={(sourceId, targetId, options) =>
+          void nestCollectionUnder(sourceId, targetId, options)
         }
-        onMoveCollectionToRoot={(collectionId) =>
-          void moveCollectionToRoot(collectionId)
+        onMoveCollectionToRoot={(collectionId, options) =>
+          void moveCollectionToRoot(collectionId, options)
         }
         onImportDroppedFiles={(files, targetFolderId, targetCollectionId, webPayload) =>
           void importDroppedFiles(files, targetFolderId, targetCollectionId, webPayload)
