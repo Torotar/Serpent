@@ -80,6 +80,7 @@ import {
 } from "./search-history";
 import { useWindowsBrowseShortcutBridge } from "./use-windows-browse-shortcut-bridge";
 import { useCollectionCommandShortcuts } from "./use-collection-command-shortcuts";
+import { useShortcutRuntimeVersion } from "./shortcut-provider";
 import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { ImportLibraryChooserDialog, OpenLibraryChooserDialog } from "./ImportLibraryChooserDialog";
@@ -862,6 +863,7 @@ function ToolButton({
 function AppInner() {
   const shellLayout = useShellLayout();
   const localConfirmation = useLocalConfirmation();
+  const shortcutRuntimeVersion = useShortcutRuntimeVersion();
   const t = useT();
   const { locale } = useLocale();
   const rawLibraryApi = (window as RendererWindow).serpent?.library;
@@ -8782,6 +8784,12 @@ function AppInner() {
       cancelInlineSmartCollectionEdit();
       openInlineFolderCreate(parentFolderId);
     },
+    copyFolder: (folderId) => {
+      void handleCopyFolder(folderId);
+    },
+    pasteIntoFolder: (folderId) => {
+      dispatchClipboardPaste(folderId);
+    },
     renameFolder: (folderId, currentName) => {
       cancelInlineSmartCollectionEdit();
       openInlineFolderRename(folderId, currentName);
@@ -8827,6 +8835,12 @@ function AppInner() {
     enabled: Boolean(library) && !showTrash,
     platform: SHORTCUT_PLATFORM,
     previewOpen: Boolean(previewAsset),
+    createSubcollection: (parentCollectionId) => {
+      cancelInlineSmartCollectionEdit();
+      setShowCollectionInput(true);
+      setCollectionInputValue("");
+      setNewCollectionParentId(parentCollectionId);
+    },
     renameCollection: (collectionId, currentName) => {
       cancelInlineSmartCollectionEdit();
       openInlineCollectionRename(collectionId, currentName);
@@ -13635,6 +13649,7 @@ function AppInner() {
       />
     ) : null}
     <main
+      data-shortcut-version={shortcutRuntimeVersion}
       data-shell-layout={shellLayout}
       className={`app-shell${leftOpen ? "" : " left-collapsed"}${rightOpen ? "" : " right-collapsed"}${panelResizing ? " is-resizing" : ""}`}
       style={panelResizeShellStyle as React.CSSProperties}

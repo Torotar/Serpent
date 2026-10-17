@@ -27,6 +27,11 @@ export const APP_UPDATE_CANCEL_CHANNEL = 'serpent:app-update:cancel' as const;
 /** Main → Renderer: update download/install progress for the About dialog. */
 export const APP_UPDATE_PROGRESS_CHANNEL = 'serpent:app-update:progress' as const;
 /** Renderer → Main: read launch-at-login preferences. */
+export const SHORTCUT_BINDINGS_GET_CHANNEL = 'serpent:shortcuts:get' as const;
+export const SHORTCUT_BINDINGS_SET_CHANNEL = 'serpent:shortcuts:set' as const;
+export const SHORTCUT_BINDINGS_EXPORT_CHANNEL = 'serpent:shortcuts:export' as const;
+export const SHORTCUT_BINDINGS_IMPORT_CHANNEL = 'serpent:shortcuts:import' as const;
+
 export const STARTUP_PREFERENCES_GET_CHANNEL = 'serpent:startup-preferences:get' as const;
 /** Renderer → Main: persist launch-at-login preferences. */
 export const STARTUP_PREFERENCES_SET_CHANNEL = 'serpent:startup-preferences:set' as const;

@@ -15,6 +15,7 @@ import {
   type ShortcutEvent,
   type ShortcutSpec,
 } from "./commands/command-types";
+import { matchesRuntimeShortcut } from "./shortcut-runtime";
 
 const assetKeyboardCommandRegistry = createCommandRegistry(
   assetCommandDefinitions,
@@ -36,11 +37,11 @@ export function matchAssetActionKeyboardCommand(
   event: ShortcutEvent,
   platform: CommandPlatform,
 ): boolean {
+  const resolved = matchesRuntimeShortcut(commandId, event, platform);
+  if (resolved !== null) return resolved;
   const spec: ShortcutSpec | undefined =
     assetKeyboardCommandRegistry.get(commandId)?.shortcut;
-  return (
-    spec !== undefined && matchesShortcut(spec, event, platform)
-  );
+  return spec !== undefined && matchesShortcut(spec, event, platform);
 }
 
 export function isEditableAssetActionKeyboardTarget(

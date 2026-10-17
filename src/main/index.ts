@@ -161,6 +161,30 @@ import {
   type StartupPreferences,
   type StartupPreferencesSnapshot,
 } from '../shared/startup-preferences';
+import {
+  readShortcutBindings,
+  shortcutBindingsFilePath,
+  writeShortcutBindings,
+} from './shortcut-bindings-store';
+import {
+  parseShortcutBindings,
+  parseShortcutChord,
+  shortcutPlatformFromProcess,
+  withPlatformBindings,
+  type ShortcutOverride,
+} from '../shared/shortcut-bindings';
+import { findShortcutAction } from '../shared/shortcut-catalog';
+import {
+  findAllShortcutConflicts,
+  validateShortcutBindings,
+  validateShortcutChord,
+} from '../shared/shortcut-resolution';
+import type {
+  ShortcutBindingsSetResult,
+  ShortcutFileExportResult,
+  ShortcutFileImportResult,
+} from '../shared/shortcut-api';
+import { resolveNativeDialogCopy } from '../shared/native-dialog-i18n';
 
 import { popupEditContextMenu } from "./edit-context-menu";
 import {
@@ -207,6 +231,10 @@ import {
   APP_UPDATE_PROGRESS_CHANNEL,
   STARTUP_PREFERENCES_GET_CHANNEL,
   STARTUP_PREFERENCES_SET_CHANNEL,
+  SHORTCUT_BINDINGS_EXPORT_CHANNEL,
+  SHORTCUT_BINDINGS_GET_CHANNEL,
+  SHORTCUT_BINDINGS_IMPORT_CHANNEL,
+  SHORTCUT_BINDINGS_SET_CHANNEL,
   REVEAL_APP_LOG_CHANNEL,
   READ_APP_LOG_CHANNEL,
   SHOW_EDIT_CONTEXT_MENU_CHANNEL,
@@ -1503,6 +1531,175 @@ function suppressWindowDuringUpdateHandoff(window: BrowserWindow): void {
 
 function startupPreferencesPath(): string {
   return startupPreferencesFilePath(app.getPath("userData"));
+}
+
+function shortcutBindingsPath(): string {
+  return shortcutBindingsFilePath(app.getPath("userData"));
+}
+
+function readShortcutBindingsSnapshot() {
+  return readShortcutBindings(shortcutBindingsPath());
+}
+
+async function exportShortcutBindingsFile(): Promise<ShortcutFileExportResult> {
+  const copy = resolveNativeDialogCopy(appLocale, "exportShortcuts");
+  try {
+    const e2ePath =
+      process.env.SERPENT_E2E === "1"
+        ? process.env.SERPENT_E2E_SHORTCUTS_EXPORT_PATH
+        : undefined;
+    let filePath = e2ePath;
+    if (!filePath) {
+      const options: Electron.SaveDialogOptions = {
+        title: copy.title,
+        buttonLabel: copy.buttonLabel,
+        defaultPath: "serpent-shortcuts.json",
+        filters: [{ name: copy.filterName ?? "JSON", extensions: ["json"] }],
+      };
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, options)
+        : await dialog.showSaveDialog(options);
+      if (result.canceled || !result.filePath) {
+        return { ok: false, error: "canceled", canceled: true };
+      }
+      filePath = result.filePath;
+    }
+    const bindings = readShortcutBindingsSnapshot();
+    writeFileSync(filePath, `${JSON.stringify(bindings, null, 2)}\n`, "utf8");
+    return { ok: true, path: filePath };
+  } catch (error) {
+    logger?.error("shortcuts.export", error);
+    return { ok: false, error: "shortcut-export-failed" };
+  } finally {
+    ensureRendererKeyboardFocus(mainWindow, {
+      reattachHwnd: true,
+      reason: "shortcuts.export",
+    });
+  }
+}
+
+async function importShortcutBindingsFile(): Promise<ShortcutFileImportResult> {
+  const copy = resolveNativeDialogCopy(appLocale, "importShortcuts");
+  try {
+    const e2ePath =
+      process.env.SERPENT_E2E === "1"
+        ? process.env.SERPENT_E2E_SHORTCUTS_IMPORT_PATH
+        : undefined;
+    let selected = e2ePath;
+    if (!selected) {
+      const options: Electron.OpenDialogOptions = {
+        title: copy.title,
+        buttonLabel: copy.buttonLabel,
+        properties: ["openFile"],
+        filters: [{ name: copy.filterName ?? "JSON", extensions: ["json"] }],
+      };
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      selected = result.filePaths[0];
+      if (result.canceled || !selected) {
+        return { ok: false, error: "canceled", canceled: true };
+      }
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(selected, "utf8"));
+    } catch {
+      return { ok: false, error: "invalid-shortcut-file" };
+    }
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      (parsed as { version?: unknown }).version !== 1 ||
+      !(parsed as { platforms?: unknown }).platforms ||
+      typeof (parsed as { platforms?: unknown }).platforms !== "object" ||
+      Array.isArray((parsed as { platforms?: unknown }).platforms)
+    ) {
+      return { ok: false, error: "invalid-shortcut-file" };
+    }
+    const imported = parseShortcutBindings(parsed);
+    const platform = shortcutPlatformFromProcess(process.platform);
+    const validation = validateShortcutBindings(imported, platform);
+    if (validation !== null) return { ok: false, error: validation };
+    // Import only the current platform; the other platform's local settings
+    // are preserved when a backup moves between Windows and macOS.
+    const bindings = withPlatformBindings(
+      readShortcutBindingsSnapshot(),
+      platform,
+      imported.platforms[platform],
+    );
+    writeShortcutBindings(shortcutBindingsPath(), bindings);
+    return { ok: true, bindings };
+  } catch (error) {
+    logger?.error("shortcuts.import", error);
+    return { ok: false, error: "shortcut-import-failed" };
+  } finally {
+    ensureRendererKeyboardFocus(mainWindow, {
+      reattachHwnd: true,
+      reason: "shortcuts.import",
+    });
+  }
+}
+
+function storeShortcutBindings(input: unknown): ShortcutBindingsSetResult {
+  const current = readShortcutBindingsSnapshot();
+  const platform = shortcutPlatformFromProcess(process.platform);
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, bindings: current, error: "invalid-shortcut-request" };
+  }
+  const record = input as { platform?: unknown; bindings?: unknown };
+  if (record.platform !== platform) {
+    return { ok: false, bindings: current, error: "invalid-shortcut-platform" };
+  }
+  if (
+    !record.bindings ||
+    typeof record.bindings !== "object" ||
+    Array.isArray(record.bindings)
+  ) {
+    return { ok: false, bindings: current, error: "invalid-shortcut-bindings" };
+  }
+
+  const next: Record<string, ShortcutOverride> = {};
+  for (const [actionId, value] of Object.entries(
+    record.bindings as Record<string, unknown>,
+  )) {
+    if (value === null) {
+      next[actionId] = null;
+      continue;
+    }
+    const chord = parseShortcutChord(value);
+    if (!chord) {
+      return { ok: false, bindings: current, error: "invalid-shortcut-chord" };
+    }
+    const action = findShortcutAction(actionId);
+    if (action?.customizable === false) {
+      return { ok: false, bindings: current, error: "shortcut-fixed" };
+    }
+    if (action) {
+      const reason = validateShortcutChord(chord, platform, action.scopes);
+      if (reason !== null) {
+        return { ok: false, bindings: current, error: "invalid-shortcut-chord" };
+      }
+    } else if (!Object.prototype.hasOwnProperty.call(current.platforms[platform], actionId)) {
+      // Unknown ids are not accepted from a fresh renderer payload; existing
+      // unknown entries are merged below so a downgrade does not lose data.
+      continue;
+    }
+    next[actionId] = chord;
+  }
+  for (const [actionId, value] of Object.entries(current.platforms[platform])) {
+    if (!(actionId in next) && !findShortcutAction(actionId)) {
+      next[actionId] = value;
+    }
+  }
+
+  const candidate = withPlatformBindings(current, platform, next);
+  if (findAllShortcutConflicts(platform, candidate).length > 0) {
+    return { ok: false, bindings: current, error: "shortcut-conflict" };
+  }
+  writeShortcutBindings(shortcutBindingsPath(), candidate);
+  return { ok: true, bindings: candidate };
 }
 
 function getOSLoginItemState(): {
@@ -6196,6 +6393,59 @@ async function startApplication(): Promise<void> {
     }
     return readStartupPreferencesSnapshot();
   });
+
+  ipcMain.handle(SHORTCUT_BINDINGS_GET_CHANNEL, (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      return readShortcutBindingsSnapshot();
+    }
+    return readShortcutBindingsSnapshot();
+  });
+
+  ipcMain.handle(
+    SHORTCUT_BINDINGS_EXPORT_CHANNEL,
+    async (event): Promise<ShortcutFileExportResult> => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) {
+        return { ok: false, error: "unauthorized-sender" };
+      }
+      return exportShortcutBindingsFile();
+    },
+  );
+
+  ipcMain.handle(
+    SHORTCUT_BINDINGS_IMPORT_CHANNEL,
+    async (event): Promise<ShortcutFileImportResult> => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) {
+        return { ok: false, error: "unauthorized-sender" };
+      }
+      return importShortcutBindingsFile();
+    },
+  );
+
+  ipcMain.handle(
+    SHORTCUT_BINDINGS_SET_CHANNEL,
+    (event, input: unknown): ShortcutBindingsSetResult => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) {
+        logger?.info("ipc.shortcuts", "Rejected shortcut update.", {
+          code: "unauthorized-sender",
+        });
+        return {
+          ok: false,
+          bindings: readShortcutBindingsSnapshot(),
+          error: "unauthorized-sender",
+        };
+      }
+      try {
+        return storeShortcutBindings(input);
+      } catch (error) {
+        logger?.error("shortcuts.store", error);
+        return {
+          ok: false,
+          bindings: readShortcutBindingsSnapshot(),
+          error: "shortcut-save-failed",
+        };
+      }
+    },
+  );
 
   ipcMain.handle(STARTUP_PREFERENCES_SET_CHANNEL, (event, input: unknown): StartupPreferencesSnapshot => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {

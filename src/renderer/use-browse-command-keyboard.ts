@@ -21,8 +21,7 @@ import {
   isEditableAssetActionKeyboardTarget,
 } from "./asset-action-keyboard";
 import type { CommandPlatform } from "./commands/command-types";
-import { toolbarCommandRegistry } from "./commands/toolbar-commands";
-import { matchesShortcut } from "./commands/command-types";
+import { matchesRuntimeShortcut } from "./shortcut-runtime";
 import {
   isLibrarySearchInput,
   matchFocusSearchShortcut,
@@ -93,9 +92,6 @@ export function useBrowseCommandKeyboard(
   useEffect(() => {
     if (!enabled) return;
 
-    const refreshShortcut = toolbarCommandRegistry.get("canvas.refresh")
-      ?.shortcut;
-
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableAssetActionKeyboardTarget(event.target)) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
@@ -139,6 +135,11 @@ export function useBrowseCommandKeyboard(
         return;
       }
 
+      // Sidebar rows own their folder/collection shortcuts while focused.
+      if (document.activeElement?.closest(".nav-tree-row")) {
+        return;
+      }
+
       if (
         matchFocusSearchShortcut(event, platform) &&
         libraryOpen &&
@@ -151,8 +152,7 @@ export function useBrowseCommandKeyboard(
       }
 
       if (
-        refreshShortcut !== undefined &&
-        matchesShortcut(refreshShortcut, event, platform) &&
+        matchesRuntimeShortcut("canvas.refresh", event, platform) === true &&
         libraryOpen &&
         !busy
       ) {

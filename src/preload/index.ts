@@ -10,6 +10,7 @@ import {
 import { mcp } from './bridge/mcp';
 import { plugins } from './bridge/plugins';
 import { shell } from './bridge/shell';
+import { shortcuts } from './bridge/shortcuts';
 import { startup } from './bridge/startup';
 import { getE2eRequestCount } from './transport';
 import type { RendererRequest } from '../shared/protocol/requests';
@@ -58,6 +59,7 @@ contextBridge.exposeInMainWorld(
   Object.freeze({
     library,
     shell,
+    shortcuts,
     startup,
     appUpdate,
     automation,

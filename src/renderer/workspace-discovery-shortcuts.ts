@@ -10,6 +10,7 @@ import {
   type ShortcutEvent,
   type ShortcutSpec,
 } from "./commands/command-types";
+import { matchesRuntimeShortcut } from "./shortcut-runtime";
 
 /** Focus the library search field: ⌘F / Ctrl+F. */
 export const FOCUS_SEARCH_SHORTCUT: ShortcutSpec = {
@@ -21,7 +22,8 @@ export function matchFocusSearchShortcut(
   event: ShortcutEvent,
   platform: CommandPlatform,
 ): boolean {
-  return matchesShortcut(FOCUS_SEARCH_SHORTCUT, event, platform);
+  const resolved = matchesRuntimeShortcut("workspace.focus-search", event, platform);
+  return resolved ?? matchesShortcut(FOCUS_SEARCH_SHORTCUT, event, platform);
 }
 
 export function isLibrarySearchInput(target: EventTarget | null): boolean {

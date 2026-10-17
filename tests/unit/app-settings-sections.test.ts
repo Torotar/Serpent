@@ -34,6 +34,7 @@ describe("app-settings-sections (Serpent-97l / Serpent-9es / Serpent-i07)", () =
       "assets",
       "appearance",
       "browse",
+      "shortcuts",
       "ai",
       "semantic-search",
       "mcp",

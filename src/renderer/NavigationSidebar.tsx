@@ -2469,6 +2469,7 @@ export function NavigationSidebar(props: NavigationSidebarProps) {
     rows.push(...children.map((c) => (
       <div
         className="collection-drop-target"
+        data-nav-collection-id={c.collectionId}
         draggable={inlineCollectionRename?.collectionId !== c.collectionId}
         key={c.collectionId}
         onDragEnd={() => onSetDraggedCollectionId(null)}

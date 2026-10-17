@@ -6,6 +6,7 @@ import {
   type CommandPlatform,
   type ShortcutSpec,
 } from "./commands/command-types";
+import { matchesRuntimeShortcut } from "./shortcut-runtime";
 import {
   sidebarCommandDefinitions,
   type SidebarCommandDefinition,
@@ -16,6 +17,7 @@ const collectionKeyboardCommandRegistry = createCommandRegistry(
 );
 
 type CollectionShortcutCommandId =
+  | "collection.create-subcollection"
   | "collection.rename"
   | "collection.delete";
 
@@ -33,6 +35,8 @@ function matchCollectionShortcut(
   event: KeyboardEvent,
   platform: CommandPlatform,
 ): boolean {
+  const resolved = matchesRuntimeShortcut(commandId, event, platform);
+  if (resolved !== null) return resolved;
   const spec: ShortcutSpec | undefined =
     collectionKeyboardCommandRegistry.get(commandId)?.shortcut;
   return spec !== undefined && matchesShortcut(spec, event, platform);
@@ -42,6 +46,7 @@ export type UseCollectionCommandShortcutsArgs = {
   readonly enabled: boolean;
   readonly platform: CommandPlatform;
   readonly previewOpen: boolean;
+  readonly createSubcollection: (collectionId: string) => void;
   readonly renameCollection: (collectionId: string, currentName: string) => void;
   readonly deleteCollection: (collectionId: string, name: string) => void;
 };
@@ -58,6 +63,7 @@ export function useCollectionCommandShortcuts(
     enabled,
     platform,
     previewOpen,
+    createSubcollection,
     renameCollection,
     deleteCollection,
   } = args;
@@ -81,6 +87,12 @@ export function useCollectionCommandShortcuts(
       )?.textContent?.trim();
       if (!name) return;
 
+      if (matchCollectionShortcut("collection.create-subcollection", event, platform)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        createSubcollection(collectionId);
+        return;
+      }
       if (matchCollectionShortcut("collection.rename", event, platform)) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -100,6 +112,7 @@ export function useCollectionCommandShortcuts(
     enabled,
     platform,
     previewOpen,
+    createSubcollection,
     renameCollection,
     deleteCollection,
   ]);
