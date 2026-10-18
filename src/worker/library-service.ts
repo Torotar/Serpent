@@ -5466,15 +5466,17 @@ interface ActiveImportTransfer {
  *
  * On Windows the timer floor is about 15ms. Yielding once per file therefore
  * turns a 20,000-file transfer into more than ten minutes of waits. Yield
- * only after a short slice of real work so cancellation and Worker IPC still
- * run, without paying that floor on every entry.
+ * the timer only after a short slice of real work so Worker IPC still runs,
+ * without paying that floor on every entry.
  */
 const transferYieldSliceMs = 50;
 let nextTransferYieldAt = 0;
 
 function transferCheckpoint(): Promise<void> {
   const now = Date.now();
-  if (now < nextTransferYieldAt) return Promise.resolve();
+  // Inside a slice, still yield one macrotask with setImmediate (no timer
+  // floor) so in-process cancel requests run between files.
+  if (now < nextTransferYieldAt) return new Promise((resolve) => setImmediate(resolve));
   nextTransferYieldAt = now + transferYieldSliceMs;
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
