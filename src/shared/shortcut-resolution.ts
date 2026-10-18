@@ -20,15 +20,33 @@ import {
   type ShortcutBindings,
 } from "./shortcut-bindings";
 
-export type ShortcutEventLike = {
+export type ShortcutKeyboardEventLike = {
+  readonly kind?: "keyboard";
   readonly key: string;
   readonly code?: string;
   readonly keyCode?: number;
+  readonly location?: number;
+  readonly metaKey?: boolean;
+  readonly ctrlKey?: boolean;
+  readonly altKey?: boolean;
+  readonly shiftKey?: boolean;
+  readonly repeat?: boolean;
+};
+
+/** Side-button input remains a mouse event all the way through matching. */
+export type ShortcutMouseEventLike = {
+  readonly kind: "mouse";
+  readonly button: 3 | 4;
   readonly metaKey: boolean;
   readonly ctrlKey: boolean;
   readonly altKey: boolean;
   readonly shiftKey: boolean;
+  readonly repeat?: boolean;
 };
+
+export type ShortcutEventLike =
+  | ShortcutKeyboardEventLike
+  | ShortcutMouseEventLike;
 
 export type ShortcutConflict = {
   readonly actionId: string;
@@ -42,7 +60,15 @@ export type ShortcutValidationReason =
   | "modifier-only"
   | "no-key"
   | "system"
-  | "bare-key";
+  | "bare-key"
+  | "mouse-modifier-required"
+  | "mouse-button"
+  | "ime-route-required";
+
+export type ShortcutMouseLabels = {
+  readonly mouseBack?: string;
+  readonly mouseForward?: string;
+};
 
 const NAMED_KEY_CODES: Readonly<Record<string, number>> = {
   backspace: 8,
@@ -89,8 +115,14 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
   tab: "Tab",
 };
 
-function keyLabel(chord: ShortcutChord, platform: ShortcutPlatform): string {
+function keyLabel(
+  chord: ShortcutChord,
+  platform: ShortcutPlatform,
+  mouseLabels: ShortcutMouseLabels = {},
+): string {
   const normalized = chord.key.toLowerCase();
+  if (normalized === "mouseback") return mouseLabels.mouseBack ?? "Mouse Back";
+  if (normalized === "mouseforward") return mouseLabels.mouseForward ?? "Mouse Forward";
   if (platform === "mac" && normalized === "backspace") return "⌫";
   if (platform === "mac" && normalized === "enter") return "↵";
   if (KEY_LABELS[normalized] !== undefined) return KEY_LABELS[normalized];
@@ -103,8 +135,9 @@ function keyLabel(chord: ShortcutChord, platform: ShortcutPlatform): string {
 export function formatShortcutChord(
   chord: ShortcutChord,
   platform: ShortcutPlatform,
+  mouseLabels?: ShortcutMouseLabels,
 ): string {
-  const key = keyLabel(chord, platform);
+  const key = keyLabel(chord, platform, mouseLabels);
   if (platform === "mac") {
     return [
       chord.ctrlKey === true ? "⌃" : "",
@@ -125,8 +158,56 @@ export function formatShortcutChord(
 export function formatShortcutChords(
   chords: readonly ShortcutChord[],
   platform: ShortcutPlatform,
+  mouseLabels?: ShortcutMouseLabels,
 ): string {
-  return chords.map((chord) => formatShortcutChord(chord, platform)).join(" / ");
+  return chords.map((chord) => formatShortcutChord(chord, platform, mouseLabels)).join(" / ");
+}
+
+/** Electron's accelerator syntax for native/hidden menu registration. */
+export function formatElectronAccelerator(
+  chord: ShortcutChord,
+  platform: ShortcutPlatform,
+): string | null {
+  const key = chord.key.toLowerCase();
+  if (key === "mouseback" || key === "mouseforward") return null;
+  const electronKey = key === "add" || chord.code?.toLowerCase() === "numpadadd"
+    ? "numadd"
+    : key === "subtract" || chord.code?.toLowerCase() === "numpadsubtract"
+      ? "numsub"
+      : key === "+"
+        ? "Plus"
+        : key === "space" || key === " "
+    ? "Space"
+    : key === "escape"
+      ? "Esc"
+      : key === "arrowleft"
+        ? "Left"
+        : key === "arrowright"
+          ? "Right"
+          : key === "arrowup"
+            ? "Up"
+            : key === "arrowdown"
+              ? "Down"
+              : key === "."
+                ? "Period"
+                : key === ","
+                  ? "Comma"
+                  : key === "delete"
+                    ? "Delete"
+                    : key === "backspace"
+                      ? "Backspace"
+                      : /^f\d{1,2}$/u.test(key)
+                        ? key.toUpperCase()
+                        : chord.key.length === 1
+                          ? chord.key.toUpperCase()
+                          : chord.key;
+  return [
+    chord.ctrlKey ? "Ctrl" : "",
+    chord.altKey ? "Alt" : "",
+    chord.metaKey ? (platform === "mac" ? "Cmd" : "Super") : "",
+    chord.shiftKey ? "Shift" : "",
+    electronKey,
+  ].filter(Boolean).join("+");
 }
 
 function overrideFor(
@@ -198,14 +279,36 @@ function eventMatchesChordKey(
   chord: ShortcutChord,
   event: ShortcutEventLike,
 ): boolean {
+  if (event.kind === "mouse") {
+    const expectedButton = chord.key.toLowerCase() === "mouseback"
+      ? 3
+      : chord.key.toLowerCase() === "mouseforward"
+        ? 4
+        : null;
+    return expectedButton !== null && event.button === expectedButton;
+  }
+  if (chord.key.toLowerCase() === "mouseback" || chord.key.toLowerCase() === "mouseforward") {
+    return false;
+  }
   const expected = chord.key.toLowerCase();
   const key = event.key.toLowerCase();
+  const code = event.code?.toLowerCase();
+  if (chord.code !== undefined && code !== undefined && code.length > 0) {
+    const expectedCode = chord.code.toLowerCase();
+    if (code === expectedCode) return true;
+    if (expectedCode === "numpaddecimal" && code === "decimal") return true;
+    return false;
+  }
+  if (chord.code?.toLowerCase() === "numpaddecimal") {
+    if (key === "decimal" || key === "numpaddecimal") return true;
+    if (key === "." && event.location === 3) return true;
+    return false;
+  }
   if (key.length > 0 && key !== "process" && key === expected) return true;
   if (expected === "delete" && key === "del") return true;
   if (expected === "space" && key === " ") return true;
   if (expected === " " && key === "space") return true;
 
-  const code = event.code?.toLowerCase();
   if (code !== undefined && code.length > 0) {
     if (code === expected) return true;
     if (expected === "delete" && (key === "del" || code === "del")) return true;
@@ -216,6 +319,9 @@ function eventMatchesChordKey(
     if (expected === "+" && (code === "equal" || code === "add")) return true;
     if (expected === "-" && (code === "minus" || code === "subtract")) return true;
     if (expected === "0" && code === "digit0") return true;
+    if (expected === "." && (code === "numpaddecimal" || code === "decimal")) return true;
+    if (expected === "+" && (code === "numpadadd" || code === "add")) return true;
+    if (expected === "-" && (code === "numpadsubtract" || code === "subtract")) return true;
   }
 
   const keyCode = event.keyCode;
@@ -235,10 +341,11 @@ export function matchesShortcutChord(
   chord: ShortcutChord,
   event: ShortcutEventLike,
 ): boolean {
-  if (event.altKey !== (chord.altKey ?? false)) return false;
-  if (event.metaKey !== (chord.metaKey ?? false)) return false;
-  if (event.ctrlKey !== (chord.ctrlKey ?? false)) return false;
-  if (event.shiftKey !== (chord.shiftKey ?? false)) return false;
+  if (event.repeat === true) return false;
+  if ((event.altKey ?? false) !== (chord.altKey ?? false)) return false;
+  if ((event.metaKey ?? false) !== (chord.metaKey ?? false)) return false;
+  if ((event.ctrlKey ?? false) !== (chord.ctrlKey ?? false)) return false;
+  if ((event.shiftKey ?? false) !== (chord.shiftKey ?? false)) return false;
   return eventMatchesChordKey(chord, event);
 }
 
@@ -337,7 +444,7 @@ export function validateShortcutBindings(
     const action = findShortcutAction(actionId);
     if (!action) continue;
     if (!action.customizable) return "shortcut-fixed";
-    if (validateShortcutChord(override, platform, action.scopes) !== null) {
+    if (validateShortcutChord(override, platform, action.scopes, actionId) !== null) {
       return "invalid-shortcut-chord";
     }
   }
@@ -367,6 +474,17 @@ export function reservedShortcutReason(
   const key = normalizedKey(chord);
   if (key === "escape" || key === "tab") return "system";
   if (platform === "mac") {
+    // Electron's native Edit roles own these text-editing chords. Keeping
+    // them out of the custom catalog lets Cut and Paste-and-Match-Style keep
+    // their native menu behavior even when application accelerators change.
+    if (
+      chord.metaKey && !chord.ctrlKey && !chord.altKey && !chord.shiftKey
+      && key === "x"
+    ) return "system";
+    if (
+      chord.metaKey && !chord.ctrlKey && chord.altKey && chord.shiftKey
+      && key === "v"
+    ) return "system";
     if (chord.metaKey && !chord.ctrlKey && !chord.altKey && !chord.shiftKey) {
       if (["q", "w", "tab", "space", "h", "m"].includes(key)) return "system";
     }
@@ -377,6 +495,16 @@ export function reservedShortcutReason(
     if (chord.metaKey && !chord.altKey && ["r", "p"].includes(key)) return "system";
     if (chord.metaKey && chord.altKey && ["i", "j", "c"].includes(key)) return "system";
   } else {
+    // Windows text editing and Chromium's paste-as-plain-text gesture are
+    // native ownership too; application shortcuts may not replace them.
+    if (
+      chord.ctrlKey && !chord.metaKey && !chord.altKey && !chord.shiftKey
+      && key === "x"
+    ) return "system";
+    if (
+      chord.ctrlKey && !chord.metaKey && !chord.altKey && chord.shiftKey
+      && key === "v"
+    ) return "system";
     if (chord.altKey && ["f4", "tab", "space"].includes(key)) return "system";
     if (chord.ctrlKey && chord.altKey && key === "delete") return "system";
     if (chord.metaKey) return "system";
@@ -393,13 +521,31 @@ export function validateShortcutChord(
   chord: ShortcutChord,
   platform: ShortcutPlatform,
   scopes: readonly ShortcutScope[],
+  actionId?: string,
 ): ShortcutValidationReason | null {
   const key = normalizedKey(chord);
   if (key.length === 0 || key === "process" || key === "dead" || key === "unidentified") {
     return "no-key";
   }
+  if (key.startsWith("mouse")) {
+    if (key !== "mouseback" && key !== "mouseforward") return "mouse-button";
+    if (!(chord.ctrlKey || chord.altKey || chord.shiftKey || chord.metaKey)) {
+      return "mouse-modifier-required";
+    }
+    return null;
+  }
   if (MODIFIER_KEYS.has(key)) return "modifier-only";
   if (reservedShortcutReason(chord, platform) !== null) return "system";
+  const action = actionId === undefined ? undefined : findShortcutAction(actionId);
+  const bareLetter = /^[a-z]$/iu.test(key)
+    && !chord.ctrlKey && !chord.metaKey && !chord.altKey && !chord.shiftKey;
+  if (
+    bareLetter && action?.category === "viewer" &&
+    (!action.surfaces.includes("hidden-accelerator") ||
+      !action.surfaces.includes("before-input"))
+  ) {
+    return "ime-route-required";
+  }
   const needsModifier = scopes.some(
     (scope) => scope === "app" || scope === "browse" || scope.startsWith("sidebar"),
   );

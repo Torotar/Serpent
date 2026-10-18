@@ -6,7 +6,12 @@ import {
   type CommandPlatform,
   type ShortcutSpec,
 } from "./commands/command-types";
-import { matchesRuntimeShortcut } from "./shortcut-runtime";
+import {
+  asLegacyKeyboardShortcutEvent,
+  listenForShortcutInputs,
+  matchesRuntimeShortcut,
+} from "./shortcut-runtime";
+import type { ShortcutEventLike } from "../shared/shortcut-resolution";
 import {
   sidebarCommandDefinitions,
   type SidebarCommandDefinition,
@@ -43,14 +48,15 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 
 function matchFolderCommandShortcut(
   commandId: FolderShortcutCommandId,
-  event: KeyboardEvent,
+  event: ShortcutEventLike,
   platform: CommandPlatform,
 ): boolean {
   const resolved = matchesRuntimeShortcut(commandId, event, platform);
   if (resolved !== null) return resolved;
   const spec: ShortcutSpec | undefined =
     folderKeyboardCommandRegistry.get(commandId)?.shortcut;
-  return spec !== undefined && matchesShortcut(spec, event, platform);
+  const keyboardEvent = asLegacyKeyboardShortcutEvent(event);
+  return keyboardEvent !== null && spec !== undefined && matchesShortcut(spec, keyboardEvent, platform);
 }
 
 export type UseFolderCommandShortcutsArgs = {
@@ -106,7 +112,7 @@ export function useFolderCommandShortcuts(
   useEffect(() => {
     if (!enabled) return;
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onShortcutInput = (shortcutInput: ShortcutEventLike, event: KeyboardEvent | MouseEvent) => {
       if (isEditableKeyboardTarget(event.target)) return;
       if (previewOpen) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
@@ -114,7 +120,7 @@ export function useFolderCommandShortcuts(
       if (document.activeElement?.closest("[data-nav-collection-id]")) return;
 
       for (const commandId of FOLDER_SHORTCUT_COMMAND_IDS) {
-        if (!matchFolderCommandShortcut(commandId, event, platform)) continue;
+        if (!matchFolderCommandShortcut(commandId, shortcutInput, platform)) continue;
 
         const action = resolveFolderShortcutAction({
           commandId,
@@ -192,8 +198,7 @@ export function useFolderCommandShortcuts(
       }
     };
 
-    document.addEventListener("keydown", onKeyDown, platform === "windows");
-    return () => document.removeEventListener("keydown", onKeyDown, platform === "windows");
+    return listenForShortcutInputs(document, onShortcutInput, platform === "windows");
   }, [
     enabled,
     platform,

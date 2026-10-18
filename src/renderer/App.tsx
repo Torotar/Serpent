@@ -81,6 +81,12 @@ import {
 import { useWindowsBrowseShortcutBridge } from "./use-windows-browse-shortcut-bridge";
 import { useCollectionCommandShortcuts } from "./use-collection-command-shortcuts";
 import { useShortcutRuntimeVersion } from "./shortcut-provider";
+import {
+  listenForMouseShortcutInputs,
+  listenForShortcutInputs,
+  matchesRuntimeShortcut,
+} from "./shortcut-runtime";
+import type { ShortcutEventLike } from "../shared/shortcut-resolution";
 import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { ImportLibraryChooserDialog, OpenLibraryChooserDialog } from "./ImportLibraryChooserDialog";
@@ -565,7 +571,7 @@ import { WindowEdgeResizeHandles } from "./WindowEdgeResizeHandles";
 import { WindowsWindowControls } from "./WindowsWindowControls";
 import { useViewerChromeIdle } from "./use-viewer-chrome-idle";
 import { useViewerVolume } from "./use-viewer-volume";
-import { useDialogFocusTrap } from "./use-dialog-focus-trap";
+import { hasActiveModalDialog, useDialogFocusTrap } from "./use-dialog-focus-trap";
 import { AssetContextMenu } from "./AssetContextMenu";
 import {
   buildPluginBrowseScope,
@@ -674,7 +680,11 @@ import {
 import { usesWindowsStyleShell } from "./renderer-platform";
 import {
   defaultKeyboardCardSize,
+  dispatchGlobalZoomMenuAction,
+  dispatchGlobalZoomMenuCommandIfAllowed,
+  GLOBAL_ZOOM_MENU_ACTION_EVENT,
   matchGlobalZoomShortcut,
+  type GlobalZoomAction,
   shouldIgnoreGlobalZoomShortcut,
 } from "./global-zoom-shortcuts";
 
@@ -1745,9 +1755,22 @@ function AppInner() {
       setEditableTextFocused(isEditableTextTarget(target));
     };
     const onFocusIn = (event: FocusEvent) => update(event.target);
+    const onFocusOut = (event: FocusEvent) => {
+      if (isEditableTextTarget(event.relatedTarget)) {
+        update(event.relatedTarget);
+        return;
+      }
+      // A modal may remove its focused input without focusing another element.
+      // Read activeElement after the browser completes that focus transition.
+      queueMicrotask(() => update(document.activeElement));
+    };
     update(document.activeElement);
-    document.addEventListener("focusin", onFocusIn);
-    return () => document.removeEventListener("focusin", onFocusIn);
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+    };
   }, []);
   const refreshOperationHistory = useCallback(async () => {
     if (!api || !library) {
@@ -2360,7 +2383,7 @@ function AppInner() {
   const {
     volume: viewerVolume,
     muted: viewerVolumeMuted,
-  } = useViewerVolume();
+  } = useViewerVolume(false);
   const assetViewMode = canvasPrefs.viewMode;
   const assetCardSize = canvasPrefs.cardSize;
   const [canvasWidthPx, setCanvasWidthPx] = useState(0);
@@ -3751,13 +3774,15 @@ function AppInner() {
     if (!shellApi) return;
     return shellApi.onInvertSelection(() => {
       if (previewAsset) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (editableTextFocused) return;
+      if (hasActiveModalDialog()) return;
       if (browseScopeAssetIds.length === 0) return;
       void invertBrowseScope();
     });
   }, [
     shellApi,
     previewAsset,
+    editableTextFocused,
     browseScopeAssetIds,
     invertBrowseScope,
     setAssetSelectionAnchor,
@@ -4177,11 +4202,7 @@ function AppInner() {
   // (Serpent-46i9 / Serpent-7ny). Viewer owns the chord while preview is open.
   useEffect(() => {
     if (previewAsset) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (shouldIgnoreGlobalZoomShortcut(event.target)) return;
-      const action = matchGlobalZoomShortcut(event, SHORTCUT_PLATFORM);
-      if (!action) return;
-      event.preventDefault();
+    const applyZoomAction = (action: GlobalZoomAction) => {
       const canvas = workspaceCanvasRef.current;
       const rect = canvas?.getBoundingClientRect();
       const centerX = rect
@@ -4207,8 +4228,26 @@ function AppInner() {
         centerY,
       );
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    const onShortcutInput = (shortcutInput: ShortcutEventLike, event: KeyboardEvent | MouseEvent) => {
+      if (shouldIgnoreGlobalZoomShortcut(event.target)) return;
+      const action = matchGlobalZoomShortcut(shortcutInput, SHORTCUT_PLATFORM);
+      if (!action) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      applyZoomAction(action);
+    };
+    const onMenuZoom = (event: Event) => {
+      if (shouldIgnoreGlobalZoomShortcut(document.activeElement)) return;
+      const action = (event as CustomEvent<GlobalZoomAction>).detail;
+      if (action !== "in" && action !== "out" && action !== "reset") return;
+      applyZoomAction(action);
+    };
+    const removeShortcutInputs = listenForShortcutInputs(document, onShortcutInput);
+    window.addEventListener(GLOBAL_ZOOM_MENU_ACTION_EVENT, onMenuZoom);
+    return () => {
+      removeShortcutInputs();
+      window.removeEventListener(GLOBAL_ZOOM_MENU_ACTION_EVENT, onMenuZoom);
+    };
   }, [assetCardSize, previewAsset, resizeAssetCards]);
 
   const saveCurrentWorkspaceHistoryViewport = useCallback(() => {
@@ -11947,10 +11986,13 @@ function AppInner() {
   useWindowsBrowseShortcutBridge({
     shell: shellApi,
     enabled: Boolean(library) && !showTagManagement && !showPluginSidebarView,
-    acceleratorsBlocked:
+    browseAcceleratorsBlocked:
       dialogFocusTrapActive ||
-      Boolean(previewAsset) ||
-      editableTextFocused,
+      Boolean(previewAsset),
+    // The bridge checks document.activeElement itself for text focus; passing
+    // the React state here could leave accelerators disabled after a focused
+    // field is removed along with its modal.
+    applicationAcceleratorsBlocked: dialogFocusTrapActive,
   });
 
   useEffect(() => {
@@ -12157,7 +12199,7 @@ function AppInner() {
       ) {
         return;
       }
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (hasActiveModalDialog()) return;
 
       // Windows clipboard images are frequently bitmap-only (CF_DIB) that the
       // renderer's clipboardData never reports as an image item. Delegate
@@ -12196,10 +12238,12 @@ function AppInner() {
       collectionEditor
     )
       return;
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onShortcutInput = (shortcutInput: ShortcutEventLike, event: KeyboardEvent | MouseEvent) => {
       const target = event.target;
+      const keyboard = shortcutInput.kind === "mouse" ? null : shortcutInput;
+      if (hasActiveModalDialog()) return;
       if (previewAsset) {
-        if (event.key === "Escape" && !document.fullscreenElement) {
+        if (keyboard?.key === "Escape" && !document.fullscreenElement) {
           event.preventDefault();
           void (async () => {
             if (previewModalRef.current) {
@@ -12219,18 +12263,16 @@ function AppInner() {
         ) {
           return;
         }
-        if (event.key === "ArrowLeft" && previewIndex > 0) {
+        const previous = matchesRuntimeShortcut("viewer.previous", shortcutInput, SHORTCUT_PLATFORM);
+        const next = matchesRuntimeShortcut("viewer.next", shortcutInput, SHORTCUT_PLATFORM);
+        if (previous || next) {
           event.preventDefault();
-          navigateAssetPreview(visibleAssets[previewIndex - 1]!);
-          return;
-        }
-        if (
-          event.key === "ArrowRight" &&
-          previewIndex >= 0 &&
-          previewIndex < visibleAssets.length - 1
-        ) {
-          event.preventDefault();
-          navigateAssetPreview(visibleAssets[previewIndex + 1]!);
+          event.stopImmediatePropagation();
+          if (previous && previewIndex > 0) {
+            navigateAssetPreview(visibleAssets[previewIndex - 1]!);
+          } else if (next && previewIndex >= 0 && previewIndex < visibleAssets.length - 1) {
+            navigateAssetPreview(visibleAssets[previewIndex + 1]!);
+          }
         }
         return;
       }
@@ -12249,7 +12291,7 @@ function AppInner() {
         )
       )
         return;
-      if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return;
+      if (!keyboard || (keyboard.key !== "Enter" && keyboard.key !== " ") || keyboard.repeat) return;
       if (
         !selectedAsset ||
         selectedAsset.availability !== "available" ||
@@ -12259,8 +12301,8 @@ function AppInner() {
       event.preventDefault();
       openAssetPreview(selectedAsset);
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    const removeShortcutInputs = listenForShortcutInputs(document, onShortcutInput);
+    return removeShortcutInputs;
   }, [
     batchRelinkPreview,
     closeAssetPreview,
@@ -13266,6 +13308,9 @@ function AppInner() {
       toggleFullscreen: () => {
         void shellApi?.windowControl("fullscreen-toggle");
       },
+      zoomIn: () => dispatchGlobalZoomMenuAction("in"),
+      zoomOut: () => dispatchGlobalZoomMenuAction("out"),
+      zoomReset: () => dispatchGlobalZoomMenuAction("reset"),
       openAppLog,
       openAbout,
       openGitHub: () => {
@@ -13298,6 +13343,38 @@ function AppInner() {
     };
     return shellApi.onApplicationMenuCommand(({ command, payload }) => {
       const currentMenuSections = mainMenuSectionsRef.current;
+      const globalZoomAction = command === "canvas.zoom-in"
+        ? "in"
+        : command === "canvas.zoom-out"
+          ? "out"
+          : command === "canvas.zoom-reset"
+            ? "reset"
+            : null;
+      if (globalZoomAction) {
+        dispatchGlobalZoomMenuCommandIfAllowed(
+          globalZoomAction,
+          document.activeElement,
+          hasActiveModalDialog(),
+        );
+        return;
+      }
+      const activeElement = document.activeElement;
+      const textEditingFocused = activeElement instanceof HTMLInputElement
+        || activeElement instanceof HTMLTextAreaElement
+        || activeElement instanceof HTMLSelectElement
+        || (activeElement instanceof HTMLElement && activeElement.isContentEditable);
+      if (
+        command === "window.toggle-fullscreen" &&
+        (textEditingFocused || hasActiveModalDialog())
+      ) return;
+      if (textEditingFocused && command === "edit.paste") {
+        void shellApi.nativeEditCommand("paste");
+        return;
+      }
+      if (textEditingFocused && command === "edit.select-all") {
+        void shellApi.nativeEditCommand("select-all");
+        return;
+      }
       // Native 资源库 menu: open a recent library by path (same action the
       // in-app library switcher performs).
       if (command === "library.open-recent") {
@@ -13355,7 +13432,13 @@ function AppInner() {
         && operationHistory?.redoTop !== null && operationHistory?.redoTop !== undefined
         && !busy,
     );
-  }, [busy, editableTextFocused, operationHistory, shellApi, t]);
+    shellApi.setApplicationMenuCommandEnabled(
+      "window.toggle-fullscreen",
+      !isEditableTextTarget(document.activeElement)
+        && !dialogFocusTrapActive
+        && !hasActiveModalDialog(),
+    );
+  }, [busy, dialogFocusTrapActive, editableTextFocused, operationHistory, shellApi, t]);
 
   // Serpent-接管: Windows has no native menu bar (its accelerators are gone),
   // so the business undo/redo shortcuts live in the renderer. A focused text
@@ -13364,10 +13447,11 @@ function AppInner() {
     if (!IS_WINDOWS_PLATFORM) return;
     const onUndoRedoKeyDown = (event: KeyboardEvent) => {
       if (editableTextFocused || busy) return;
-      if (!event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key !== "z" && event.key !== "Z") return;
+      const undo = matchesRuntimeShortcut("edit.undo", event, SHORTCUT_PLATFORM) === true;
+      const redo = matchesRuntimeShortcut("edit.redo", event, SHORTCUT_PLATFORM) === true;
+      if (!undo && !redo) return;
       event.preventDefault();
-      if (event.shiftKey) {
+      if (redo) {
         if (operationHistory?.redoTop !== null && operationHistory?.redoTop !== undefined) {
           void redoLastOperation();
         }
@@ -13378,6 +13462,44 @@ function AppInner() {
     document.addEventListener("keydown", onUndoRedoKeyDown);
     return () => document.removeEventListener("keydown", onUndoRedoKeyDown);
   }, [busy, editableTextFocused, operationHistory, undoLastFileOp, redoLastOperation]);
+
+  // Mouse chords cannot be registered as Electron accelerators. Route them
+  // through the renderer while keeping native menus authoritative for keys.
+  useEffect(() => listenForMouseShortcutInputs(document, (input, event) => {
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable) ||
+      hasActiveModalDialog()
+    ) return;
+    if (matchesRuntimeShortcut("window.toggle-fullscreen", input, SHORTCUT_PLATFORM) === true) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void shellApi?.windowControl("fullscreen-toggle");
+      return;
+    }
+    if (busy) return;
+    const undo = matchesRuntimeShortcut("edit.undo", input, SHORTCUT_PLATFORM) === true;
+    const redo = matchesRuntimeShortcut("edit.redo", input, SHORTCUT_PLATFORM) === true;
+    if (!undo && !redo) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (redo) {
+      if (operationHistory?.redoTop !== null && operationHistory?.redoTop !== undefined) {
+        void redoLastOperation();
+      }
+    } else if (operationHistory?.undoTop !== null && operationHistory?.undoTop !== undefined) {
+      void undoLastFileOp();
+    }
+  }), [
+    busy,
+    operationHistory,
+    redoLastOperation,
+    shellApi,
+    undoLastFileOp,
+  ]);
 
   // Serpent-f74e48: during a text search the ordinary folder-card-row is
   // reused directly (matching folders appear as the same cards as browsing)

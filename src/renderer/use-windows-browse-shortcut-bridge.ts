@@ -7,6 +7,7 @@
  */
 
 import { useEffect } from "react";
+import { hasActiveModalDialog } from "./use-dialog-focus-trap";
 
 import {
   BROWSE_KEYBOARD_ACTIONS,
@@ -19,6 +20,7 @@ export type BrowseShortcutShell = {
     listener: (action: BrowseKeyboardAction) => void,
   ) => () => void;
   readonly setBrowseShortcutAcceleratorsEnabled?: (enabled: boolean) => void;
+  readonly setApplicationShortcutAcceleratorsEnabled?: (enabled: boolean) => void;
 };
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -37,25 +39,60 @@ function isBrowseKeyboardAction(value: string): value is BrowseKeyboardAction {
 export function useWindowsBrowseShortcutBridge(args: {
   readonly shell: BrowseShortcutShell | null | undefined;
   readonly enabled: boolean;
-  /** True while inputs, dialogs, or preview must keep F2/Delete. */
-  readonly acceleratorsBlocked: boolean;
+  /** Browse keys stay fixed while a viewer, input, or modal owns the keys. */
+  readonly browseAcceleratorsBlocked: boolean;
+  /** App commands remain available in viewers, but yield to inputs and modals. */
+  readonly applicationAcceleratorsBlocked: boolean;
 }): void {
-  const { shell, enabled, acceleratorsBlocked } = args;
+  const {
+    shell,
+    enabled,
+    browseAcceleratorsBlocked,
+    applicationAcceleratorsBlocked,
+  } = args;
 
   useEffect(() => {
-    shell?.setBrowseShortcutAcceleratorsEnabled?.(
-      enabled && !acceleratorsBlocked,
-    );
-  }, [shell, enabled, acceleratorsBlocked]);
+    let listening = true;
+    const sync = (target: EventTarget | null = document.activeElement) => {
+      const editable = isEditableKeyboardTarget(target);
+      const modalOpen = hasActiveModalDialog();
+      shell?.setBrowseShortcutAcceleratorsEnabled?.(
+        enabled && !browseAcceleratorsBlocked && !editable && !modalOpen,
+      );
+      shell?.setApplicationShortcutAcceleratorsEnabled?.(
+        enabled && !applicationAcceleratorsBlocked && !editable && !modalOpen,
+      );
+    };
+    const onFocusIn = (event: FocusEvent) => sync(event.target);
+    const onFocusOut = () => queueMicrotask(() => {
+      // A queued focusout can outlive this effect when modal state changes.
+      // Do not let its stale closure re-disable the freshly synchronized menu.
+      if (listening) sync();
+    });
+
+    sync();
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      listening = false;
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+    };
+  }, [
+    shell,
+    enabled,
+    browseAcceleratorsBlocked,
+    applicationAcceleratorsBlocked,
+  ]);
 
   useEffect(() => {
     if (!enabled || !shell?.onBrowseShortcut) return;
 
     return shell.onBrowseShortcut((action) => {
       if (!isBrowseKeyboardAction(action)) return;
-      if (acceleratorsBlocked) return;
+      if (browseAcceleratorsBlocked) return;
       if (isEditableKeyboardTarget(document.activeElement)) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (hasActiveModalDialog()) return;
 
       const init = browseKeyboardActionToDomInit(action);
       document.dispatchEvent(
@@ -71,5 +108,5 @@ export function useWindowsBrowseShortcutBridge(args: {
         }),
       );
     });
-  }, [shell, enabled, acceleratorsBlocked]);
+  }, [shell, enabled, browseAcceleratorsBlocked]);
 }

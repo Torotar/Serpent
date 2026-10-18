@@ -47,10 +47,17 @@ import {
   clearViewerVideoShortcutCapture,
   isViewerVideoShortcutContentsActive,
   setViewerVideoShortcutCaptureActive,
+  viewerShortcutScopeForContents,
 } from "./viewer-video-shortcut-capture";
 import { forwardViewerVideoShortcut } from "./viewer-video-shortcut-forward";
 import { forwardBrowseShortcut } from "./browse-shortcut-forward";
-import { setWindowsBrowseShortcutAcceleratorsEnabled } from "./viewer-video-shortcut-menu";
+import {
+  forwardApplicationShortcutToWindow,
+  isWindowsApplicationShortcut,
+  matchWindowsApplicationShortcut,
+  setWindowsApplicationShortcutAcceleratorsEnabled,
+  setWindowsBrowseShortcutAcceleratorsEnabled,
+} from "./viewer-video-shortcut-menu";
 import { matchBrowseKeyboardShortcut } from "../shared/browse-keyboard-shortcuts";
 import { artifactProtocolMimeForExtension } from "../shared/media-formats";
 import {
@@ -244,6 +251,7 @@ import {
   SHELL_SWIPE_CHANNEL,
   WINDOW_FOCUS_CHANNEL,
   NATIVE_EDIT_COPY_CHANNEL,
+  NATIVE_EDIT_COMMAND_CHANNEL,
   PLUGIN_MANAGER_CHANNEL,
   PLUGIN_INSTALL_PROGRESS_CHANNEL,
   EMBEDDING_INSTALL_PROGRESS_CHANNEL,
@@ -253,6 +261,7 @@ import {
   PLUGIN_INPUT_CAPTURE_SYSTEM_MODAL_CHANNEL,
   VIEWER_VIDEO_SHORTCUTS_ACTIVE_CHANNEL,
   BROWSE_SHORTCUT_MENU_ENABLED_CHANNEL,
+  APPLICATION_SHORTCUTS_ENABLED_CHANNEL,
   OFFSCREEN_THUMBNAIL_FRAME_CHANNEL,
   MCP_SETTINGS_REQUEST_CHANNEL,
   MCP_SETTINGS_EVENT_CHANNEL,
@@ -1000,6 +1009,7 @@ function refreshApplicationMenuRecentLibraries(): void {
   installApplicationMenu({
     locale: appLocale,
     recentLibraries: nativeMenuRecentLibraries(),
+    shortcutBindings: readShortcutBindingsSnapshot(),
   });
 }
 
@@ -1629,6 +1639,11 @@ async function importShortcutBindingsFile(): Promise<ShortcutFileImportResult> {
       imported.platforms[platform],
     );
     writeShortcutBindings(shortcutBindingsPath(), bindings);
+    installApplicationMenu({
+      locale: appLocale,
+      recentLibraries: nativeMenuRecentLibraries(),
+      shortcutBindings: bindings,
+    });
     return { ok: true, bindings };
   } catch (error) {
     logger?.error("shortcuts.import", error);
@@ -1676,7 +1691,7 @@ function storeShortcutBindings(input: unknown): ShortcutBindingsSetResult {
       return { ok: false, bindings: current, error: "shortcut-fixed" };
     }
     if (action) {
-      const reason = validateShortcutChord(chord, platform, action.scopes);
+      const reason = validateShortcutChord(chord, platform, action.scopes, actionId);
       if (reason !== null) {
         return { ok: false, bindings: current, error: "invalid-shortcut-chord" };
       }
@@ -1698,6 +1713,11 @@ function storeShortcutBindings(input: unknown): ShortcutBindingsSetResult {
     return { ok: false, bindings: current, error: "shortcut-conflict" };
   }
   writeShortcutBindings(shortcutBindingsPath(), candidate);
+  installApplicationMenu({
+    locale: appLocale,
+    recentLibraries: nativeMenuRecentLibraries(),
+    shortcutBindings: candidate,
+  });
   return { ok: true, bindings: candidate };
 }
 
@@ -1988,13 +2008,17 @@ async function createMainWindow(): Promise<void> {
     // E2E can keep its renderer fully loaded and automatable without putting
     // a test window over the user's desktop session. An update handoff stays
     // hidden so a second launch cannot flash a window.
+    const e2eShowInactive = process.env.SERPENT_E2E === "1"
+      && process.env.SERPENT_E2E_SHOW_INACTIVE === "1";
     if (shouldShowMainWindowOnReady({
       updateHandoff,
       applicationQuitting,
       e2eHideWindow: process.env.SERPENT_E2E === "1"
-        && process.env.SERPENT_E2E_HIDE_WINDOW === "1",
+        && process.env.SERPENT_E2E_HIDE_WINDOW === "1"
+        && !e2eShowInactive,
     })) {
-      window.show();
+      if (e2eShowInactive) window.showInactive();
+      else window.show();
     }
   });
   // Cleanup while webContents/HWND still exist (`closed` is too late).
@@ -2037,6 +2061,34 @@ async function createMainWindow(): Promise<void> {
       return;
     }
     if (shouldHideApplicationMenuBar(process.platform)) {
+      const appAction = input.type === "keyDown"
+        ? matchWindowsApplicationShortcut({
+            key: input.key,
+            code: input.code,
+            keyCode: (input as { keyCode?: number }).keyCode,
+            control: input.control,
+            meta: input.meta,
+            alt: input.alt,
+            shift: input.shift,
+            isAutoRepeat: input.isAutoRepeat,
+          })
+        : null;
+      const repeatedAppAction = input.type === "keyDown" && input.isAutoRepeat
+        ? isWindowsApplicationShortcut({
+            key: input.key,
+            code: input.code,
+            keyCode: (input as { keyCode?: number }).keyCode,
+            control: input.control,
+            meta: input.meta,
+            alt: input.alt,
+            shift: input.shift,
+          })
+        : false;
+      if (appAction || repeatedAppAction) {
+        event.preventDefault();
+        if (appAction) forwardApplicationShortcutToWindow(window, appAction);
+        return;
+      }
       const browseAction = matchBrowseKeyboardShortcut({
         type: input.type,
         code: input.code,
@@ -2054,7 +2106,9 @@ async function createMainWindow(): Promise<void> {
     if (!isViewerVideoShortcutContentsActive(window.webContents.id)) {
       return;
     }
-    const action = matchViewerVideoLetterShortcut({
+    const viewerScope = viewerShortcutScopeForContents(window.webContents.id);
+    if (viewerScope === null) return;
+    const viewerInput = {
       type: input.type,
       code: input.code,
       key: input.key,
@@ -2063,10 +2117,27 @@ async function createMainWindow(): Promise<void> {
       meta: input.meta,
       alt: input.alt,
       shift: input.shift,
-    });
-    if (!action) return;
+      isAutoRepeat: input.isAutoRepeat,
+    };
+    const bindings = readShortcutBindingsSnapshot();
+    const platform = shortcutPlatformFromProcess(process.platform);
+    const action = matchViewerVideoLetterShortcut(
+      viewerInput,
+      bindings,
+      platform,
+      viewerScope,
+    );
+    const repeatedViewerAction = input.type === "keyDown" && input.isAutoRepeat
+      ? matchViewerVideoLetterShortcut(
+        { ...viewerInput, isAutoRepeat: false },
+        bindings,
+        platform,
+        viewerScope,
+      )
+      : null;
+    if (!action && !repeatedViewerAction) return;
     event.preventDefault();
-    forwardViewerVideoShortcut(window.webContents, action);
+    if (action) forwardViewerVideoShortcut(window.webContents, action);
   });
   // Defense in depth (Serpent-46i9): even if a page-zoom accelerator sneaks
   // back into the menu, Chromium must not rescale the whole UI.
@@ -6632,6 +6703,11 @@ async function startApplication(): Promise<void> {
     if (!mainWindow || event.sender !== mainWindow.webContents) return;
     event.sender.copy();
   });
+  ipcMain.handle(NATIVE_EDIT_COMMAND_CHANNEL, (event, input: unknown): void => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return;
+    if (input === "paste") event.sender.paste();
+    if (input === "select-all") event.sender.selectAll();
+  });
 
   // Bootstrap dialog locale from OS before Renderer syncs (Serpent-bwb).
   appLocale = mapSystemLocaleToAppLocale(app.getLocale());
@@ -6655,6 +6731,7 @@ async function startApplication(): Promise<void> {
     installApplicationMenu({
       locale: appLocale,
       recentLibraries: nativeMenuRecentLibraries(),
+      shortcutBindings: readShortcutBindingsSnapshot(),
     });
     windowsTray?.updateLocale(appLocale);
   });
@@ -6728,13 +6805,32 @@ async function startApplication(): Promise<void> {
     setWindowsBrowseShortcutAcceleratorsEnabled(enabled);
   });
 
+  ipcMain.on(APPLICATION_SHORTCUTS_ENABLED_CHANNEL, (event, input: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return;
+    const enabled =
+      typeof input === "object" &&
+      input !== null &&
+      "enabled" in input &&
+      Boolean((input as { enabled?: unknown }).enabled);
+    setWindowsApplicationShortcutAcceleratorsEnabled(enabled);
+  });
+
   ipcMain.on(VIEWER_VIDEO_SHORTCUTS_ACTIVE_CHANNEL, (event, input: unknown) => {
+    const scope = typeof input === "object" && input !== null && "scope" in input
+      && (input as { scope?: unknown }).scope === "viewer.audio"
+      ? "viewer.audio"
+      : "viewer.video";
     const active =
       typeof input === "object" &&
       input !== null &&
       "active" in input &&
       Boolean((input as { active?: unknown }).active);
-    setViewerVideoShortcutCaptureActive(event.sender, active);
+    setViewerVideoShortcutCaptureActive(
+      event.sender,
+      active,
+      readShortcutBindingsSnapshot(),
+      scope,
+    );
   });
 
   ipcMain.on(PLUGIN_INPUT_CAPTURE_EVENT_CHANNEL, (event, payload: unknown) => {
@@ -6769,6 +6865,7 @@ async function startApplication(): Promise<void> {
   installApplicationMenu({
     locale: appLocale,
     recentLibraries: nativeMenuRecentLibraries(),
+    shortcutBindings: readShortcutBindingsSnapshot(),
   });
 
   registerWindowControls({

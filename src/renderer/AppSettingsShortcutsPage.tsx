@@ -28,9 +28,11 @@ import {
   findShortcutConflictsForChord,
   formatShortcutChord,
   validateShortcutChord,
+  type ShortcutMouseLabels,
   type ShortcutConflict,
 } from "../shared/shortcut-resolution";
 import type { ShortcutChord } from "../shared/shortcut-catalog";
+import { shortcutInputFromMouseEvent } from "./shortcut-runtime";
 import { IconActionButton } from "./icon-action-button";
 import { SettingsCard } from "./ui/patterns";
 
@@ -39,6 +41,10 @@ const SCOPE_LABEL_KEYS: Record<ShortcutScope, string> = {
   browse: "shortcuts.scope.browse",
   "sidebar.folder": "shortcuts.scope.sidebarFolder",
   "sidebar.collection": "shortcuts.scope.sidebarCollection",
+  "viewer.base": "shortcuts.scope.viewerBase",
+  "viewer.image": "shortcuts.scope.viewerImage",
+  "viewer.video": "shortcuts.scope.viewerVideo",
+  "viewer.audio": "shortcuts.scope.viewerAudio",
 };
 
 const FILTERS: readonly ShortcutFilter[] = ["all", "modified", "conflicts"];
@@ -62,8 +68,11 @@ function validationMessage(
 ): string {
   if (reason === "modifier-only") return t("shortcuts.modifierOnly");
   if (reason === "bare-key") return t("shortcuts.bareKey");
+  if (reason === "ime-route-required") return t("shortcuts.imeRouteRequired");
   if (reason === "system") return t("shortcuts.reserved");
   if (reason === "no-key") return t("shortcuts.noKey");
+  if (reason === "mouse-modifier-required") return t("shortcuts.mouseModifierRequired");
+  if (reason === "mouse-button") return t("shortcuts.mouseButtonUnsupported");
   return t("shortcuts.updateFailed");
 }
 
@@ -94,8 +103,11 @@ export function AppSettingsShortcutsPage(): ReactNode {
   const captureRef = useRef<HTMLDivElement | null>(null);
 
   const rows = useMemo(
-    () => buildShortcutRows(platform, bindings),
-    [bindings, platform],
+    () => buildShortcutRows(platform, bindings, {
+      mouseBack: t("shortcuts.mouse.back"),
+      mouseForward: t("shortcuts.mouse.forward"),
+    } satisfies ShortcutMouseLabels),
+    [bindings, platform, t],
   );
   const counts = useMemo(() => countShortcutRows(rows), [rows]);
   const visibleGroups = useMemo<ShortcutGroupModel[]>(() => {
@@ -224,7 +236,7 @@ export function AppSettingsShortcutsPage(): ReactNode {
       }
       setConflictDraft(null);
       setDraftChord(chord);
-      const reason = validateShortcutChord(chord, platform, action.scopes);
+      const reason = validateShortcutChord(chord, platform, action.scopes, action.id);
       if (reason !== null) {
         setRecorderError(reason);
         return;
@@ -255,11 +267,46 @@ export function AppSettingsShortcutsPage(): ReactNode {
         ),
       );
     };
+    const onMouseDown = (event: MouseEvent) => {
+      const input = shortcutInputFromMouseEvent(event);
+      if (input === null) return;
+      // Side buttons otherwise trigger Chromium's back/forward navigation.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (saving) return;
+      const chord: ShortcutChord = {
+        key: input.button === 3 ? "MouseBack" : "MouseForward",
+        ...(input.metaKey ? { metaKey: true } : {}),
+        ...(input.ctrlKey ? { ctrlKey: true } : {}),
+        ...(input.altKey ? { altKey: true } : {}),
+        ...(input.shiftKey ? { shiftKey: true } : {}),
+      };
+      setModifierPreview("");
+      setDraftChord(chord);
+      setConflictDraft(null);
+      const reason = validateShortcutChord(chord, platform, action.scopes, action.id);
+      if (reason !== null) {
+        setRecorderError(reason);
+        return;
+      }
+      setRecorderError(null);
+      const conflicts = findShortcutConflictsForChord(
+        action.id,
+        chord,
+        platform,
+        bindings,
+      );
+      if (conflicts.length > 0) {
+        setConflictDraft({ actionId: action.id, chord, conflicts });
+      }
+    };
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("mousedown", onMouseDown, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("mousedown", onMouseDown, true);
     };
   }, [
     acceptDraft,
@@ -421,6 +468,8 @@ export function AppSettingsShortcutsPage(): ReactNode {
                   ? "shortcuts.group.folder"
                   : group.category === "collection"
                     ? "shortcuts.group.collection"
+                  : group.category === "viewer"
+                    ? "shortcuts.group.viewer"
                     : "shortcuts.group.app",
             )}
           >
@@ -429,7 +478,10 @@ export function AppSettingsShortcutsPage(): ReactNode {
                 const editing = editingActionId === row.action.id;
                 const rowConflicts = row.conflicts;
                 const displayChord = draftChord
-                  ? formatShortcutChord(draftChord, platform)
+                  ? formatShortcutChord(draftChord, platform, {
+                      mouseBack: t("shortcuts.mouse.back"),
+                      mouseForward: t("shortcuts.mouse.forward"),
+                    })
                   : modifierPreview;
                 return (
                   <div
@@ -584,8 +636,6 @@ export function AppSettingsShortcutsPage(): ReactNode {
             "shortcuts.fixedCtrlWheel",
             "shortcuts.fixedMiddleDrag",
             "shortcuts.fixedEscape",
-            "shortcuts.fixedArrows",
-            "shortcuts.fixedKeyboard",
           ].map((key) => (
             <li key={key}>
               <span>{t(key)}</span>

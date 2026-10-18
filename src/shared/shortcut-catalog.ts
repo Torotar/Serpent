@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Custom keyboard shortcut catalog (v1-lite)
+// Custom keyboard shortcut catalog (R2)
 //
 // One declaration per user-configurable action. The same catalog feeds the
 // Renderer matchers, context-menu labels and the shortcut settings page.
@@ -8,19 +8,26 @@
 
 export type ShortcutPlatform = "mac" | "windows";
 
-/** Where an action can fire. Browse and sidebar are mutually exclusive by focus. */
+/** Where an action can fire. Browse, sidebar and viewer media scopes are exclusive. */
 export type ShortcutScope =
   | "app"
   | "browse"
   | "sidebar.folder"
-  | "sidebar.collection";
+  | "sidebar.collection"
+  | "viewer.base"
+  | "viewer.image"
+  | "viewer.video"
+  | "viewer.audio";
 
 export type ShortcutSurface =
   | "renderer"
   | "context-menu"
-  | "hidden-accelerator";
+  | "app-menu"
+  | "native-menu"
+  | "hidden-accelerator"
+  | "before-input";
 
-export type ShortcutCategory = "asset" | "folder" | "collection" | "app";
+export type ShortcutCategory = "asset" | "folder" | "collection" | "app" | "viewer";
 
 export type ShortcutChord = {
   /** Logical key used for display and named-key matching. */
@@ -38,7 +45,7 @@ export type ShortcutActionDefinition = {
   readonly labelKey: string;
   readonly category: ShortcutCategory;
   readonly scopes: readonly ShortcutScope[];
-  /** false = occupied by an existing shortcut but not editable in v1-lite. */
+  /** false = occupied by a fixed system or structural shortcut. */
   readonly customizable: boolean;
   readonly defaults: {
     readonly mac: readonly ShortcutChord[];
@@ -71,6 +78,11 @@ const shiftCommand = (key: string, platform: ShortcutPlatform): ShortcutChord =>
 
 const functionKey = (key: string): ShortcutChord =>
   chord(key, { code: key });
+
+const viewerLetter = (key: string): ShortcutChord =>
+  chord(key, { code: `Key${key.toUpperCase()}` });
+
+const viewerNamedKey = (key: string): ShortcutChord => chord(key, { code: key });
 
 const [assetOpenExternalMac, assetOpenExternalWin] = [
   command("o", "mac"),
@@ -137,6 +149,20 @@ const rendererContextAndHidden: readonly ShortcutSurface[] = [
   "renderer",
   "context-menu",
   "hidden-accelerator",
+];
+
+const rendererMainAndHidden: readonly ShortcutSurface[] = [
+  "renderer",
+  "app-menu",
+  "native-menu",
+  "hidden-accelerator",
+  "before-input",
+];
+
+const rendererViewerMain: readonly ShortcutSurface[] = [
+  "renderer",
+  "hidden-accelerator",
+  "before-input",
 ];
 
 export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.freeze([
@@ -340,8 +366,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "asset",
     scopes: ["browse"],
     defaults: { mac: [command("c", "mac")], windows: [command("c", "windows")] },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: ["renderer", "context-menu", "app-menu", "native-menu", "hidden-accelerator", "before-input"],
   },
   {
     id: "asset.paste",
@@ -349,8 +375,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "asset",
     scopes: ["browse"],
     defaults: { mac: [command("v", "mac")], windows: [command("v", "windows")] },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: ["renderer", "context-menu", "app-menu", "native-menu", "hidden-accelerator", "before-input"],
   },
   {
     id: "folder.copy",
@@ -376,8 +402,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "asset",
     scopes: ["browse"],
     defaults: { mac: [command("a", "mac")], windows: [command("a", "windows")] },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
   {
     id: "selection.invert",
@@ -385,8 +411,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "asset",
     scopes: ["browse"],
     defaults: { mac: [command("i", "mac")], windows: [command("i", "windows")] },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
   {
     id: "edit.undo",
@@ -394,8 +420,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "app",
     scopes: ["app"],
     defaults: { mac: [command("z", "mac")], windows: [command("z", "windows")] },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
   {
     id: "edit.redo",
@@ -406,8 +432,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
       mac: [shiftCommand("z", "mac")],
       windows: [shiftCommand("z", "windows")],
     },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
   {
     id: "canvas.zoom-in",
@@ -415,11 +441,19 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "app",
     scopes: ["app"],
     defaults: {
-      mac: [chord("=", { code: "Equal", metaKey: true })],
-      windows: [chord("=", { code: "Equal", ctrlKey: true })],
+      mac: [
+        chord("=", { code: "Equal", metaKey: true }),
+        chord("+", { code: "Equal", metaKey: true, shiftKey: true }),
+        chord("Add", { code: "NumpadAdd", metaKey: true }),
+      ],
+      windows: [
+        chord("=", { code: "Equal", ctrlKey: true }),
+        chord("+", { code: "Equal", ctrlKey: true, shiftKey: true }),
+        chord("Add", { code: "NumpadAdd", ctrlKey: true }),
+      ],
     },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
   {
     id: "canvas.zoom-out",
@@ -427,11 +461,136 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
     category: "app",
     scopes: ["app"],
     defaults: {
-      mac: [chord("-", { code: "Minus", metaKey: true })],
-      windows: [chord("-", { code: "Minus", ctrlKey: true })],
+      mac: [
+        chord("-", { code: "Minus", metaKey: true }),
+        chord("_", { code: "Minus", metaKey: true, shiftKey: true }),
+        chord("Subtract", { code: "NumpadSubtract", metaKey: true }),
+      ],
+      windows: [
+        chord("-", { code: "Minus", ctrlKey: true }),
+        chord("_", { code: "Minus", ctrlKey: true, shiftKey: true }),
+        chord("Subtract", { code: "NumpadSubtract", ctrlKey: true }),
+      ],
     },
+    customizable: true,
+    surfaces: rendererMainAndHidden,
+  },
+  {
+    id: "viewer.close",
+    labelKey: "shortcuts.action.fixed.viewerClose",
+    category: "viewer",
+    scopes: ["viewer.base"],
+    defaults: { mac: [viewerNamedKey("Escape")], windows: [viewerNamedKey("Escape")] },
     customizable: false,
-    surfaces: rendererAndContext,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.previous",
+    labelKey: "shortcuts.action.fixed.viewerPrevious",
+    category: "viewer",
+    scopes: ["viewer.base"],
+    defaults: { mac: [viewerNamedKey("ArrowLeft")], windows: [viewerNamedKey("ArrowLeft")] },
+    customizable: true,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.next",
+    labelKey: "shortcuts.action.fixed.viewerNext",
+    category: "viewer",
+    scopes: ["viewer.base"],
+    defaults: { mac: [viewerNamedKey("ArrowRight")], windows: [viewerNamedKey("ArrowRight")] },
+    customizable: true,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.media.play-pause",
+    labelKey: "shortcuts.action.viewer.playPause",
+    category: "viewer",
+    scopes: ["viewer.video", "viewer.audio"],
+    defaults: { mac: [viewerNamedKey("Space")], windows: [viewerNamedKey("Space")] },
+    customizable: true,
+    surfaces: rendererViewerMain,
+  },
+  {
+    id: "viewer.video.frame-prev",
+    labelKey: "shortcuts.action.viewer.framePrevious",
+    category: "viewer",
+    scopes: ["viewer.video"],
+    defaults: { mac: [viewerLetter("d")], windows: [viewerLetter("d")] },
+    customizable: true,
+    surfaces: rendererViewerMain,
+  },
+  {
+    id: "viewer.video.frame-next",
+    labelKey: "shortcuts.action.viewer.frameNext",
+    category: "viewer",
+    scopes: ["viewer.video"],
+    defaults: { mac: [viewerLetter("f")], windows: [viewerLetter("f")] },
+    customizable: true,
+    surfaces: rendererViewerMain,
+  },
+  {
+    id: "viewer.video.rate-slower",
+    labelKey: "shortcuts.action.viewer.rateSlower",
+    category: "viewer",
+    scopes: ["viewer.video"],
+    defaults: { mac: [viewerLetter("x")], windows: [viewerLetter("x")] },
+    customizable: true,
+    surfaces: rendererViewerMain,
+  },
+  {
+    id: "viewer.video.rate-faster",
+    labelKey: "shortcuts.action.viewer.rateFaster",
+    category: "viewer",
+    scopes: ["viewer.video"],
+    defaults: { mac: [viewerLetter("c")], windows: [viewerLetter("c")] },
+    customizable: true,
+    surfaces: rendererViewerMain,
+  },
+  {
+    id: "viewer.video.seek-back",
+    labelKey: "shortcuts.action.viewer.seekBack",
+    category: "viewer",
+    scopes: ["viewer.video"],
+    defaults: { mac: [chord("ArrowLeft", { code: "ArrowLeft", ctrlKey: true })], windows: [chord("ArrowLeft", { code: "ArrowLeft", ctrlKey: true })] },
+    customizable: true,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.video.seek-forward",
+    labelKey: "shortcuts.action.viewer.seekForward",
+    category: "viewer",
+    scopes: ["viewer.video"],
+    defaults: { mac: [chord("ArrowRight", { code: "ArrowRight", ctrlKey: true })], windows: [chord("ArrowRight", { code: "ArrowRight", ctrlKey: true })] },
+    customizable: true,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.volume-up",
+    labelKey: "shortcuts.action.viewer.volumeUp",
+    category: "viewer",
+    scopes: ["viewer.base"],
+    defaults: { mac: [viewerNamedKey("ArrowUp")], windows: [viewerNamedKey("ArrowUp")] },
+    customizable: true,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.volume-down",
+    labelKey: "shortcuts.action.viewer.volumeDown",
+    category: "viewer",
+    scopes: ["viewer.base"],
+    defaults: { mac: [viewerNamedKey("ArrowDown")], windows: [viewerNamedKey("ArrowDown")] },
+    customizable: true,
+    surfaces: ["renderer"],
+  },
+  {
+    id: "viewer.fit",
+    labelKey: "shortcuts.action.viewer.fit",
+    category: "viewer",
+    scopes: ["viewer.image", "viewer.video"],
+    defaults: { mac: [chord(".", { code: "NumpadDecimal" })], windows: [chord(".", { code: "NumpadDecimal" })] },
+    customizable: true,
+    surfaces: ["renderer"],
   },
   {
     id: "canvas.zoom-reset",
@@ -442,8 +601,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
       mac: [chord("0", { code: "Digit0", metaKey: true })],
       windows: [chord("0", { code: "Digit0", ctrlKey: true })],
     },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
   {
     id: "window.toggle-fullscreen",
@@ -454,8 +613,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = Object.free
       mac: [chord("f", { code: "KeyF", metaKey: true, ctrlKey: true })],
       windows: [chord("F11", { code: "F11" })],
     },
-    customizable: false,
-    surfaces: rendererAndContext,
+    customizable: true,
+    surfaces: rendererMainAndHidden,
   },
 ]);
 
@@ -476,7 +635,11 @@ export function shortcutScopesOverlap(
   right: readonly ShortcutScope[],
 ): boolean {
   if (left.includes("app") || right.includes("app")) return true;
-  return left.some((scope) => right.includes(scope));
+  return left.some((leftScope) => right.some((rightScope) => {
+    if (leftScope === rightScope) return true;
+    return (leftScope === "viewer.base" && rightScope.startsWith("viewer."))
+      || (rightScope === "viewer.base" && leftScope.startsWith("viewer."));
+  }));
 }
 
 export const SHORTCUT_CATEGORY_ORDER: readonly ShortcutCategory[] = [
@@ -484,4 +647,5 @@ export const SHORTCUT_CATEGORY_ORDER: readonly ShortcutCategory[] = [
   "folder",
   "collection",
   "app",
+  "viewer",
 ];

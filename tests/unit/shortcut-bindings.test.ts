@@ -15,13 +15,18 @@ import {
   reservedShortcutReason,
   resolveActionChords,
   validateShortcutChord,
+  validateShortcutBindings,
 } from "../../src/shared/shortcut-resolution";
 import type { ShortcutChord } from "../../src/shared/shortcut-catalog";
 
 const key = (
   value: string,
   modifiers: Partial<ShortcutChord> = {},
-): ShortcutChord => ({ key: value, code: value, ...modifiers });
+): ShortcutChord => ({
+  key: value,
+  code: /^[a-z]$/iu.test(value) ? `Key${value.toUpperCase()}` : value,
+  ...modifiers,
+});
 
 const event = (
   value: string,
@@ -66,11 +71,11 @@ describe("shortcut bindings and resolution", () => {
       platforms: {
         mac: {},
         windows: {
-          "asset.copy": { key: "F4", code: "F4" },
+          "asset.view": { key: "F4", code: "F4" },
         },
       },
     });
-    expect(parsed.platforms.windows["asset.copy"]).toBeUndefined();
+    expect(parsed.platforms.windows["asset.view"]).toBeUndefined();
   });
 
   it("resolves defaults, overrides and explicit unassignment", () => {
@@ -197,6 +202,53 @@ describe("shortcut bindings and resolution", () => {
     expect(
       validateShortcutChord(key("Shift"), "windows", ["browse"]),
     ).toBe("modifier-only");
+  });
+
+  it("requires a Main IME route for bare-letter viewer bindings", () => {
+    const bindings = setShortcutOverride(
+      DEFAULT_SHORTCUT_BINDINGS,
+      "windows",
+      "viewer.fit",
+      key("g"),
+    );
+    expect(validateShortcutBindings(bindings, "windows")).toBe("invalid-shortcut-chord");
+  });
+
+  it("reserves native Cut and Paste-and-Match-Style accelerators", () => {
+    expect(
+      validateShortcutChord(key("x", { metaKey: true }), "mac", ["app"]),
+    ).toBe("system");
+    expect(
+      validateShortcutChord(
+        key("v", { metaKey: true, altKey: true, shiftKey: true }),
+        "mac",
+        ["app"],
+      ),
+    ).toBe("system");
+    expect(
+      validateShortcutChord(key("x", { ctrlKey: true }), "windows", ["app"]),
+    ).toBe("system");
+    expect(
+      validateShortcutChord(
+        key("v", { ctrlKey: true, shiftKey: true }),
+        "windows",
+        ["app"],
+      ),
+    ).toBe("system");
+    const editCut = setShortcutOverride(
+      DEFAULT_SHORTCUT_BINDINGS,
+      "mac",
+      "edit.undo",
+      key("x", { metaKey: true }),
+    );
+    const pasteMatchStyle = setShortcutOverride(
+      DEFAULT_SHORTCUT_BINDINGS,
+      "mac",
+      "edit.redo",
+      key("v", { metaKey: true, altKey: true, shiftKey: true }),
+    );
+    expect(validateShortcutBindings(editCut, "mac")).toBe("invalid-shortcut-chord");
+    expect(validateShortcutBindings(pasteMatchStyle, "mac")).toBe("invalid-shortcut-chord");
   });
 
   it("recovers a letter chord from an IME Process event", () => {

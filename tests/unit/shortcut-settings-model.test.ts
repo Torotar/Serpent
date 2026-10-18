@@ -39,6 +39,7 @@ describe("shortcut settings model", () => {
       "folder",
       "collection",
       "app",
+      "viewer",
     ]);
   });
 

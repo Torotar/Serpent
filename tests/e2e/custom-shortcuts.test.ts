@@ -29,6 +29,7 @@ test("persists custom shortcut overrides through preload and Main", async () => 
   const env = {
     ...environment(),
     SERPENT_E2E: "1",
+    SERPENT_E2E_HIDE_WINDOW: "1",
     SERPENT_E2E_USER_DATA_PATH: profilePath,
     SERPENT_E2E_SHORTCUTS_EXPORT_PATH: exportPath,
     SERPENT_E2E_SHORTCUTS_IMPORT_PATH: importPath,

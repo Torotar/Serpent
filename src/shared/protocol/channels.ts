@@ -70,6 +70,7 @@ export const LINKED_MISSING_VISIBILITY_CHANNEL =
   'serpent:shell:linked-missing-visibility' as const;
 /** Renderer → Main: fall back to Chromium text copy when no asset file copy. */
 export const NATIVE_EDIT_COPY_CHANNEL = 'serpent:shell:native-edit-copy' as const;
+export const NATIVE_EDIT_COMMAND_CHANNEL = 'serpent:shell:native-edit-command' as const;
 export const WINDOW_MAXIMIZED_CHANNEL =
   'serpent:shell:window-maximized' as const;
 /** Main → Renderer: BrowserWindow focus state (macOS traffic lights / shell chrome). */
@@ -86,6 +87,9 @@ export const BROWSE_SHORTCUT_CHANNEL =
 /** Renderer → Main: disable hidden F2/Delete accelerators in text fields. */
 export const BROWSE_SHORTCUT_MENU_ENABLED_CHANNEL =
   'serpent:shell:browse-shortcut-menu-enabled' as const;
+/** Renderer → Main: enable app accelerators independently of browse/viewer scope. */
+export const APPLICATION_SHORTCUTS_ENABLED_CHANNEL =
+  'serpent:shell:application-shortcuts-enabled' as const;
 
 /** Renderer Desktop Console → Main-owned Automation Execution/Gateway bridge. */
 export const AUTOMATION_SCRIPT_OPEN_CHANNEL = 'serpent:automation:script-open' as const;

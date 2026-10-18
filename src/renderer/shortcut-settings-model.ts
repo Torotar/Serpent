@@ -18,6 +18,7 @@ import {
   findAllShortcutConflicts,
   formatShortcutChords,
   resolveActionChords,
+  type ShortcutMouseLabels,
   type ShortcutConflict,
 } from "../shared/shortcut-resolution";
 
@@ -35,6 +36,7 @@ export type ShortcutRowModel = {
 export function buildShortcutRows(
   platform: ShortcutPlatform,
   bindings: ShortcutBindings,
+  mouseLabels?: ShortcutMouseLabels,
 ): ShortcutRowModel[] {
   const conflictMap = new Map<string, ShortcutConflict[]>();
   for (const conflict of findAllShortcutConflicts(platform, bindings)) {
@@ -48,7 +50,7 @@ export function buildShortcutRows(
     return {
       action,
       chords,
-      shortcutLabel: formatShortcutChords(chords, platform),
+      shortcutLabel: formatShortcutChords(chords, platform, mouseLabels),
       modified: hasShortcutOverride(bindings, platform, action.id),
       unassigned: chords.length === 0,
       conflicts: conflictMap.get(action.id) ?? [],

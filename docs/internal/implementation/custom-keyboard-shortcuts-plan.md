@@ -2,7 +2,8 @@
 
 > 日期：2026-10-17
 > 工单：`Serpent-963e00`
-> 状态：方案评审，未实现
+> 状态：R1/v1-lite、R2a/R2b 与全屏/查看器导航/修饰鼠标侧键 follow-up 均已实现并完成对应自动化；仍待人类/平台验收。插件与滚轮手势仍未实现。
+> 最近实现：2026-10-17；自动化证据与未验证的平台边界见开发日志和人类验收清单。
 > 关联：`docs/internal/ui/0003-keyboard-shortcut-ux-principles.md`
 > 开发日志：`docs/internal/development/2026-10-17-custom-shortcuts-development-log.md`
 
@@ -65,7 +66,7 @@ Serpent 现在已经有一套命令注册表和按平台声明的快捷键，但
 | 应用 | 反选 | Ctrl+I | ⌘I | 选择键盘 / 主菜单 |
 | 应用 | 聚焦搜索 | Ctrl+F | ⌘F | 发现工具栏 |
 | 应用 | 刷新 | F5 | F5 | 工具栏命令 |
-| 应用 | 窗口全屏 | F11 | ⌃⌘F | Main / 主菜单 |
+| 应用 | 窗口全屏 | F11 | ⌃⌘F | Main / 主菜单，可自定义 |
 | 应用 | 放大 / 缩小 / 重置 | Ctrl+= / - / 0 | ⌘= / - / 0 | 全局缩放 |
 | 资产 | 查看 | Enter（Space 为别名） | Enter（Space 为别名） | App |
 | 资产 | 用系统程序打开 | Ctrl+O | ⌘O | 命令 |
@@ -88,7 +89,7 @@ Serpent 现在已经有一套命令注册表和按平台声明的快捷键，但
 | 合集 | 重命名 | F2 | F2 | 命令 / 键盘 |
 | 合集 | 删除 | Delete | ⌘⌫ | 命令 / 键盘 |
 | 查看器 | 关闭 | Esc | Esc | App（固定） |
-| 查看器 | 上一个 / 下一个资产 | ← / → | ← / → | App（固定） |
+| 查看器 | 上一个 / 下一个资产 | ← / → | ← / → | App，可自定义；支持鼠标后退/前进侧键 |
 | 查看器 | 复制当前资产 | Ctrl+C | ⌘C | 查看器 |
 | 查看器 | 适配窗口 | 小键盘 `.`（图片另有 Space / F 别名） | 同左 | 查看器 |
 | 查看器 | 音量增 / 减 | ↑ / ↓ | ↑ / ↓ | 查看器 |
@@ -105,7 +106,7 @@ Serpent 现在已经有一套命令注册表和按平台声明的快捷键，但
 3. **没有幽灵快捷键**。一个动作被标记为可配置，就必须列出它的全部生效入口；任一入口仍读旧常量，测试失败。
 4. **平台分开保存**。Windows 与 macOS 的系统保留键、修饰键习惯不同，不把一个平台的键位硬套到另一个平台。
 5. **上下文优先**。输入框、输入法组合、模态框、查看器、侧栏焦点、浏览画布、全局之间按明确优先级分发；自定义不能绕过这条规则。
-6. **保守开放**。只开放可解释、可恢复、可验证的动作；系统编辑键和结构性导航键保持固定。
+6. **保守开放**。只开放可解释、可恢复、可验证且有完整运行时路由的动作；文本系统编辑键和查看器关闭键保持固定。查看器上一项/下一项允许自定义，因为其查看器作用域、输入让键和边界守卫完整。
 7. **改键立即生效，重启保持**。设置页不做「保存后才生效」的临时状态，避免菜单和实际按键不一致。
 
 ## 3.1 方案取舍
@@ -153,7 +154,7 @@ type ShortcutScope =
   | "viewer.text";
 
 type ShortcutChord = {
-  /** 逻辑键，用于显示与命名键匹配，例如 "s" / "F2" / "Delete" / "ArrowLeft"。 */
+  /** 逻辑键，用于显示与命名键匹配，例如 "s" / "F2" / "Delete" / "ArrowLeft" / "MouseBack"。 */
   key: string;
   /** 物理键，字母/数字/F 键优先用它匹配，避免输入法与键盘布局漂移。 */
   code?: string;
@@ -194,6 +195,8 @@ type ShortcutAction = {
 - `isReservedChord(chord, platform)`：系统/Electron 保留键校验。
 
 Renderer 与 Main 共用同一份解析器。不能一边用 `matchesShortcut(ShortcutSpec)`，另一边用自定义结构。
+
+鼠标后退/前进使用 chord key `MouseBack` / `MouseForward`，由 DOM `MouseEvent.button` 3/4 和同一事件携带的 Ctrl/Alt/Shift/Meta 修饰键匹配；至少需要一个修饰键，不生成 Electron accelerator。所有可自定义动作共用同一鼠标事件到 action matcher 的路由，设置录制、IPC、导入导出、冲突/保留键校验和运行时使用一致的 chord。捕获阶段阻止已修饰侧键触发 Chromium 的 history 默认行为；裸侧键不保存并保留系统行为。固定动作、插件动作及不属于快捷键目录的功能不接受侧键绑定。
 
 ### 4.3 覆盖存储
 
@@ -269,24 +272,24 @@ registerShortcutHandler(actionId, handler);
 
 - 作用域互斥（浏览 vs 侧栏 vs 查看器）→ 允许，各自生效；设置页可以不显示冲突。
 - 低优先级动作会被高优先级遮蔽（例如全局 Ctrl+C 与查看器 Ctrl+C）→ 显示「在查看器中会被覆盖」的警告，但允许保存。
-- 同一作用域内重复 → 硬冲突，必须替换或取消。
+- 同一作用域内重复 → 硬冲突，禁止保存；用户换键或取消当前录制。
 
 匹配到一个已绑定但当前不可执行的动作时，按键应被该作用域吞掉，不再落到更低作用域或另一个动作；这样「重命名当前不可用」不会意外触发浏览器/壳层的其它行为。输入框和文本编辑仍然优先，不走应用动作。
 
-目录中的动作还需要声明是否允许按键重复（`repeat: "allow" | "ignore"`）：重命名、删除、新建默认忽略长按；音量、缩放、视频逐帧可以按业务决定允许重复。
+当前所有离散快捷键都忽略系统自动重复，避免长按触发多次命令；Windows 隐藏菜单与 `before-input-event` 对同一物理按键也会去重。若后续需要连续重复动作，必须为该动作显式定义重复策略并补充独立测试。
 
 ## 6. 冲突与系统保留键
 
-> 2026-10-17 v1-lite 产品决定：冲突只显示纯红错误日志，不提供「替换」/「取消」按钮；用户换一个组合键，或点 ×/Esc 退出编辑。下文完整方案里的替换流程保留为后续候选。
+> 2026-10-17 产品决定：冲突只显示红色错误提示，不提供「替换」动作。用户换一个组合键，或用 ×/Esc 退出录制；确认按钮在冲突未消除时保持禁用。
 
 ### 6.1 冲突处理
 
 当用户录制一个已被占用的和弦：
 
-1. 列出冲突动作的名称和作用域。
-2. 提供「替换」和「取消」。
-3. 替换时把对方设为 `null`（显式取消）或回退到它的默认键；如果回退后的默认键仍冲突，继续提示，不能静默双绑。
-4. 保存后立即重算所有菜单和快捷键。
+1. 列出冲突动作名称和作用域，并显示红色错误提示。
+2. 不提供替换冲突动作的按钮；保持保存确认禁用，直到用户录制未冲突的和弦。
+3. 用户可以继续录制，或用 ×/Esc 取消当前动作；其他动作的绑定保持不变。
+4. 成功保存后立即重算所有菜单和快捷键。
 
 同一动作的多个别名不参与冲突；例如 `viewer.fit` 的主键和小键盘 `.` 别名是同一动作。
 
@@ -377,7 +380,7 @@ registerShortcutHandler(actionId, handler);
 | 默认 | 默认键，例如 `F2` | 更改 | 没有覆盖时显示默认键 |
 | 已修改 | 新键 + 「已修改」标签 | 更改、恢复默认 | 恢复默认只清当前行 |
 | 未设置 | 「未设置」占位 | 设置 | 用户显式清除了主键 |
-| 冲突 | 新键 + 冲突标记 | 更改、取消 | 下方展开冲突说明 |
+| 冲突 | 新键 + 红色错误提示 | 继续录制或退出 | 保存按钮禁用，不显示替换动作 |
 | 录制中 | 实时组合键预览 | 取消 | 行展开为录制面板 |
 | 固定 | 键位 + 锁图标 | 无 | 悬停显示固定原因 |
 | 插件 | 插件声明的键 | 禁用开关 | v1 只读，不可改键 |
@@ -387,6 +390,7 @@ registerShortcutHandler(actionId, handler);
 - 键帽最多显示主键；有固定别名时在悬停提示里列出，例如「别名：Space、F」。
 - 没有默认键、但属于可配置动作的行显示「未设置」，不隐藏，避免用户以为功能不存在。
 - 固定行放在对应分组末尾，和可编辑行动作区分。
+- 查看器分组使用独立标题「查看界面」（英文 `Viewer`）；应用动作仍属于「应用」（英文 `App`），不得把 viewer category fall-through 显示成应用。
 - 插件行单独分组，显示插件名，避免和内置动作混淆。
 
 ### 7.4 搜索与筛选
@@ -398,7 +402,7 @@ registerShortcutHandler(actionId, handler);
   - 「已修改」：有覆盖或显式取消的动作。
   - 「冲突」：当前有效键存在同作用域冲突的动作。
 - 搜索和过滤可以叠加；切换过滤不改变滚动位置太多，列表回到顶部。
-- 冲突计数在保存前实时更新；替换冲突后计数立即减少。
+- 冲突计数在录制时实时更新；只有使用未冲突和弦后才可保存。
 
 ### 7.5 录制流程
 
@@ -407,37 +411,30 @@ registerShortcutHandler(actionId, handler);
 3. 录制期间：
    - 捕获阶段拦截 `keydown`，阻止事件继续传播，不执行被按到的命令。
    - 页面其他快捷键进入禁用态，避免误触发。
-   - 只接受一个非修饰键；多步 chord、纯修饰键、`Dead` 键拒绝。
+   - 键盘只接受一个非修饰键；多步 chord、纯修饰键、`Dead` 键拒绝。
+   - 额外接受 DOM `MouseEvent.button` 为 3/4 的鼠标后退/前进侧键，须同时按住 Ctrl、Alt、Shift 或 Meta 中至少一个修饰键；键帽按组合显示本地化名称，例如「Ctrl+鼠标后退键」/`Ctrl+Mouse Back`。
+   - 鼠标侧键对所有可自定义动作开放；只有已配置修饰键组合才可保存。固定动作、插件和未被目录 handler 管理的动作拒绝保存及导入，避免无运行时路由的幽灵绑定。
    - `event.isComposing` 或 `key === "Process"` 时继续等待。
    - `Esc` 取消录制；输入法组合过程中的 `Esc` 不取消。
 4. 捕获到有效键后：
    - 先跑保留键校验；失败则在面板内显示原因，继续等待或取消。
    - 再跑冲突检测；无冲突则立即保存并收起面板。
-   - 有冲突则展开冲突处理区。
+   - 有冲突则显示冲突动作和红色错误提示；确认按钮禁用。
 5. 保存成功后：键帽立即更新，显示短提示「已更新「重命名」的快捷键」，焦点回到当前行。
 6. 面板提供「取消」；「清除绑定」是独立操作，不通过录制 `Backspace` 实现。
 
 ### 7.6 冲突处理
 
-冲突面板显示：
-
-- 「该键已被「重命名文件夹」使用。」
-- 如果有多条冲突，逐条列出动作名和作用域。
-- 操作按钮：「替换」和「取消」。
-
-规则：
-
-- 「替换」把所有冲突动作的覆盖设为 `null`（显式未设置），保证不会回退到同一个默认键继续冲突。
-- 替换后显示提示：「已更新「重命名」；「重命名文件夹」已取消绑定。」
-- 「取消」保持所有绑定不变，录制面板保持打开，用户可重新按键或退出。
-- 不允许静默双绑，也不允许只改一半后留下两个同键动作。
+冲突提示列出占用该和弦的动作和作用域。当前交互不提供替换其他动作的入口，也不允许保存冲突和弦；用户继续按下未占用和弦，或通过 ×/Esc 取消当前动作。其他动作的绑定始终保持不变。
 
 ### 7.7 固定手势与插件
 
 - 固定手势区列出当前版本不参与自定义的滚轮/鼠标/结构键，例如：
   - 滚轮滚动、Ctrl/Cmd+滚轮缩放、触控板 pinch。
   - 中键拖拽平移。
-  - `Esc` 关闭查看器、`←/→` 切换资产。
+  - `Esc` 关闭查看器。
+- 后退/前进鼠标侧键不再属于固定手势；带修饰键组合可绑定到任意可自定义动作，并由共享 matcher 路由。纯侧键仍保留系统行为且不可保存。
+- 查看器上一项/下一项保留 ←/→ 默认并可自定义；可把带修饰键的侧键绑定到这两个动作。
 - 固定手势只展示，不提供编辑按钮；悬停解释为什么固定。
 - 插件快捷键单独分组，显示插件名和当前键；v1 提供「禁用」开关，不给改键入口。
 - 插件被禁用或卸载后，行从列表移除；用户覆盖数据保留但解析时忽略。
@@ -464,6 +461,9 @@ registerShortcutHandler(actionId, handler);
 | Key | 中文 | English |
 | --- | --- | --- |
 | `settings.categoryShortcuts` | 快捷键 | Shortcuts |
+| `shortcuts.group.viewer` | 查看界面 | Viewer |
+| `shortcuts.mouse.back` | 鼠标后退键 | Mouse Back |
+| `shortcuts.mouse.forward` | 鼠标前进键 | Mouse Forward |
 | `shortcuts.description` | 快捷键只保存在这台设备。Windows 与 macOS 分别设置。 | Shortcuts are saved on this device. Windows and macOS are configured separately. |
 | `shortcuts.search` | 搜索动作或按键 | Search actions or keys |
 | `shortcuts.filterAll` | 全部 | All |
@@ -475,7 +475,6 @@ registerShortcutHandler(actionId, handler);
 | `shortcuts.recording` | 请按下新的快捷键… | Press the new shortcut… |
 | `shortcuts.cancel` | 取消 | Cancel |
 | `shortcuts.conflict` | 该键已被「{name}」使用。 | This key is already used by "{name}". |
-| `shortcuts.replace` | 替换 | Replace |
 | `shortcuts.reserved` | 该键由系统保留，不能用于应用命令。 | This key is reserved by the system. |
 | `shortcuts.fixed` | 固定 | Fixed |
 | `shortcuts.unassigned` | 未设置 | Not set |
@@ -510,18 +509,14 @@ registerShortcutHandler(actionId, handler);
 
 ### 7.11 v1-lite 的显示范围
 
-首个交付只显示已接通的动作分组：
-
-- 显示：浏览与资产、侧栏、全局（搜索/刷新）、固定手势。
-- 隐藏：查看器、插件分组（功能未接通前不展示空壳）。
-- 设置页结构、录制、冲突、恢复默认按完整规格实现；后续增加分组只扩展目录和渲染数据。
+v1-lite 是 2026-10-17 的首个交付范围，已实现浏览/资产、侧栏、搜索/刷新和固定手势。R2a/R2b 已在此基础上接通应用菜单与查看器媒体动作；插件分组仍不展示，避免出现未接通的空壳。
 
 ### 7.12 界面验收
 
 - 搜索「重命名」只剩相关动作；清除搜索恢复全部分组。
 - 「已修改」「冲突」计数与列表一致。
 - 改键后键帽、右键菜单标签和实际按键同时变化。
-- 冲突替换后只保留一条绑定；取消后原绑定不变。
+- 冲突时显示错误提示且不能保存；换成未占用键后保存成功，取消录制则保留原绑定。
 - 单行恢复默认、全部恢复默认、未设置状态、固定状态、插件只读状态都可见且可操作。
 - 键盘单独完成：进入页面、搜索、编辑、录制、取消、恢复默认。
 - 亮色/暗色主题、1280×800 和窄窗口下无截断、无横向滚动。
@@ -530,26 +525,28 @@ registerShortcutHandler(actionId, handler);
 
 ### 8.1 macOS 原生菜单
 
-- 全局动作（撤销/重做、全屏等）用真实 `accelerator`。
-- 上下文相关动作使用 `registerAccelerator: false`：菜单上显示用户设置的新键，但由 Renderer 的上下文路由决定是否执行；这样不会在输入框里抢走 Cmd+C/Cmd+V。
-- 保存快捷键后重建 `Menu.setApplicationMenu`，菜单标签和加速键一起更新。
-- 重建时保留现有菜单状态：最近资源库、勾选项（如显示缺失链接）、启用/禁用状态和当前语言；不能因为改键把菜单重置成默认。
-- 菜单 item id 与 action id 对齐；增加测试防止「菜单有键、目录没有」或反向漂移。
+- 应用菜单动作从共享目录解析真实 `accelerator`，保存覆盖后重建 `Menu.setApplicationMenu`；菜单标签与加速键同步更新。
+- 复制、粘贴、全选等菜单命令检查焦点：文本控件聚焦时调用 Chromium 原生编辑操作；业务撤销/重做在文本编辑焦点时禁用，避免抢走系统编辑键。
+- View 缩放 accelerator 经统一的 Renderer 所有权检查：文本编辑控件或模态框拥有焦点时不分发；普通画布焦点仍触发缩放。
+- Cut 与 Paste-and-Match-Style 保留 Electron 原生 Edit roles；平台原生组合键（macOS `⌘X`、`⌘⌥⇧V`；Windows `Ctrl+X`、`Ctrl+Shift+V`）由 validator 拒绝分配，避免自定义 Edit accelerator 覆盖原生角色。
+- 重建时传入最新快捷键、语言和最近资源库；勾选项和启用状态仍由现有 Renderer 同步机制维护。
+- 菜单 item id 与 action id 的映射由测试检查，避免菜单和目录漂移。
 
 ### 8.2 Windows 隐藏加速键
 
 - 保留现有隐藏菜单机制，因为无边框窗口没有系统菜单，且 F2/Delete 在部分 IME 下 Renderer 收不到。
 - 隐藏菜单只包含需要 Main 兜底的动作：F2、Delete、Shift+Delete、F11、查看器媒体键。
 - 菜单项使用解析后的有效键；保存后重建。
-- Renderer 通过 IPC 报告上下文 `{ editableFocused, modalOpen, viewerSurface, browseEnabled }`；Main 据此启用/禁用对应项。输入框聚焦时禁用 F2/Delete，避免抢文本编辑。
-- `before-input-event` 使用同一解析器匹配，并保留现有去重逻辑，防止菜单和 before-input 双触发。
+- Renderer 在焦点变化时通过 IPC 分别更新浏览和应用快捷键的启用状态；输入框或模态框聚焦时禁用对应隐藏加速键，查看器打开时保留应用动作。
+- `before-input-event` 与隐藏菜单共用解析结果；同一动作的双路径在 50ms 窗口内去重，系统自动重复键不再次分发。
+- 浏览/应用 scope 的焦点启用状态同样门控自定义绑定；查看器音量只由打开的音频/视频查看器持有按键监听，浏览态预览只读取同步后的音量偏好，不注册第二个监听器。
 - 自定义成 Electron 不支持的 accelerator 时，在保存前拒绝，并提示改用可注册的组合。
 
 ### 8.3 查看器与 IME
 
-- 视频 D/F/X/C 和自定义裸字母键在 Windows 上继续走「隐藏菜单 + IMM32 暂停转换 + before-input 兜底」。
+- 视频 Space、D/F、X/C、Ctrl+←/→、音量和适配使用 viewer scope；查看器外、输入框和模态框中不触发。图片、视频与 GIF 共用适配键解析器，支持用户配置的修饰键组合，同时保留输入、模态框和系统 repeat 门控。Windows 视频字母键继续走「隐藏菜单 + IMM32 暂停转换 + before-input 兜底」。
 - 自定义键若包含字母，保存 `code`；匹配优先 `code`，这样中文输入法下仍能触发。
-- 查看器打开/关闭、输入框聚焦时，Main 的上下文状态必须同步更新；不能把旧的自定义键留在隐藏菜单里。
+- 查看器打开/关闭、输入框聚焦时，Main 的菜单状态必须同步更新；重复物理按键不重复执行媒体动作，Esc/左右切资产保持固定。
 
 ## 9. 插件快捷键
 
@@ -562,14 +559,14 @@ registerShortcutHandler(actionId, handler);
 
 建议拆成 5 个可独立评审的 PR（Phase 0–4），避免一次性重写所有键盘监听。
 
-### Phase 0：目录与覆盖率审计（无行为变化）
+### Phase 0：目录与覆盖率审计（已实现）
 
 - 新增共享目录，录入现有全部默认键和固定键。
 - 建立 action id 与现有命令 id 的映射。
 - 增加覆盖率测试：每个 `CommandDefinition.shortcut`、主菜单 shortcut、查看器常量、隐藏菜单项都必须能在目录中找到；反之目录中标记为可配置的动作必须有对应 handler。
 - 把审计发现的幽灵快捷键列成清单，先补齐或移除菜单标签。
 
-### Phase 1：解析器、存储与 IPC（默认键不变）
+### Phase 1：解析器、存储与 IPC（已实现）
 
 - 实现 `resolveBinding`、`formatChord`、`matchesChord`、`findConflicts`。
 - 新增 `shortcut-bindings.json`、Main store、preload API、IPC schema。
@@ -577,25 +574,26 @@ registerShortcutHandler(actionId, handler);
 - 命令注册表的菜单标签改为从解析器取；键盘匹配器改为按 action id 取有效键。
 - 默认无覆盖时行为与现在完全一致。
 
-### Phase 2：Main / 原生菜单 / 隐藏加速键
+### Phase 2：Main / 原生菜单 / 隐藏加速键（R2a 已实现，平台验收待做）
 
-- macOS 菜单按有效键重建；上下文动作使用 `registerAccelerator: false`。
+- macOS 菜单按有效键重建；文本焦点编辑操作交给 Chromium，业务撤销/重做在文本焦点禁用。
 - Windows 隐藏菜单按有效键重建，增加上下文启用/禁用 IPC。
 - `before-input-event` 改用解析器；保留去重。
-- 此时仍不在设置页暴露编辑，只验证默认键和内部覆盖。
+- View 缩放 accelerator 由 Renderer 统一检查文本编辑与模态所有权；原生 Cut、Paste-and-Match-Style roles 保留，冲突组合由绑定校验拒绝。
+- 这些 Main 路径先于设置页开放；当前均由共享用户绑定驱动。
 
-### Phase 3：设置页与录制
+### Phase 3：设置页与录制（R1 已实现）
 
-- 新增「快捷键」分类、搜索、过滤、录制、冲突替换、恢复默认。
-- 只开放 `surfaces` 已全部接通的动作；查看器媒体键在 Phase 4 接通前显示为只读或暂不展示。
+- 新增「快捷键」分类、搜索、过滤、录制、冲突提示、恢复默认。
+- 只开放 `surfaces` 已接通的动作；当前查看器动作已由 R2b 接通。
 - 接入 i18n 中英文案。
-- 人类验收覆盖：改键立即生效、重启保持、输入框不抢键、冲突替换、恢复默认。
+- 人类验收覆盖：改键立即生效、重启保持、输入框不抢键、冲突时禁止保存、恢复默认。
 
-### Phase 4：查看器、插件与收口
+### Phase 4：查看器、插件与收口（R2b 已实现；R3 插件未实现）
 
-- 查看器媒体键、音量、适配、缩放全部接入目录。
-- 插件快捷键只读展示 + 禁用开关；评估 v2 覆盖。
-- Windows 真机 + 中文输入法；macOS 原生菜单；打包态验证。
+- 查看器媒体键、音量和适配已由 R2b 接入目录；视频与 GIF 适配键使用同一组合键解析和输入/模态/repeat 门控，音量监听仅在活动音频/视频查看器启用；缩放与应用菜单动作由 R2a 接入。
+- 插件快捷键只读展示 + 禁用开关；评估 v2 覆盖仍属于 R3。
+- Windows 真机中文输入法、macOS 原生菜单和打包态验证仍待验收。
 - 更新 UI 0003 和验收清单。
 
 ### 10.1 工作量量级
@@ -610,16 +608,16 @@ registerShortcutHandler(actionId, handler);
 | Phase 3 设置页与录制 | 4–6 个工作日 |
 | Phase 4 查看器 / 插件 / 平台验收 | 3–5 个工作日 |
 
-合计约 3–4 周；Windows 真机、中文输入法和 macOS 原生菜单验收另计。每个 Phase 独立提交，Phase 2 完成前不向用户暴露编辑入口，避免出现「能改但系统菜单不跟随」的中间状态。
+以上是方案制定时的历史工作量估算，不代表当前实现状态；R1、R2a、R2b 已落地，平台人工验收仍待完成。阶段顺序要求 Main 菜单和隐藏加速键先于设置页开放，当前入口已共同读取有效绑定。
 
-### 10.2 推荐首个交付：v1-lite（已实现）
+### 10.2 首个交付基线：v1-lite（R1 已实现，R2a/R2b 已补齐）
 
-完整方案确实偏大。真正必须先做的是「单一目录 + 解析器 + 本机存储 + 设置页」，而不是一次覆盖所有输入类型。建议首个可交付版本只做下面这一块：
+以下记录 v1-lite 的历史交付范围，不代表当前设置页仍限制在这些动作。R2a/R2b 已把应用菜单、查看器媒体与导航动作加入可配置目录和设置页。
 
 **包含**
 
 - 共享目录、解析器、Main 本机存储和 preload IPC。
-- 设置页：搜索、录制、冲突替换、逐行/全部恢复默认、JSON 导入/导出。
+- 设置页：搜索、录制、冲突提示、逐行/全部恢复默认、JSON 导入/导出。
 - 约 17 个高频命令：
   - 资产：打开外部程序、文件管理器显示、库内定位、复制路径、重命名、移入回收站、从硬盘删除。
   - 文件夹：文件管理器显示、新建子文件夹、重命名、移入回收站、从硬盘删除。
@@ -628,32 +626,32 @@ registerShortcutHandler(actionId, handler);
 - Renderer 键盘匹配、上下文菜单标签；Windows 隐藏菜单保持默认 F2 / Delete / Shift+Delete 兜底，自定义非字母键由 Renderer 处理。
 - Phase 0 顺带补齐 `folder.copy` / `folder.paste` / `collection.create-subcollection` 缺失的键盘分发。
 
-**不包含**
+**v1-lite 当时不包含（现状已由 R2a/R2b 补齐）**
 
 - 查看器媒体键（D/F/X/C、Space、音量、适配）。
-- 鼠标按钮和滚轮。
+- 后退/前进鼠标侧键带修饰键后可绑定到任何可自定义动作；裸侧键、其他鼠标按钮和滚轮仍不开放。
 - 插件快捷键。
 - 撤销/重做、复制/粘贴、全选/反选、缩放、全屏等应用菜单命令。
 - macOS 原生菜单加速键重建；这些命令主要出现在 React 上下文菜单里，不会与系统菜单抢键。
 
 **为什么这样切**
 
-- 不碰 macOS 原生菜单，避开 `registerAccelerator` 和输入框内 Cmd+C/Cmd+V 的最难部分。
-- 不碰查看器 IME，避开隐藏菜单 + IMM32 的时序。
+- v1-lite 当时未触碰 macOS 原生菜单；R2a 已补充原生 accelerator 和文本焦点编辑路由。
+- v1-lite 当时未触碰查看器 IME；R2b 已由配置驱动隐藏菜单、IMM32 与 `before-input-event`。
 - 不碰滚轮，避开连续手势和原生滚动冲突。
 - 仍然覆盖用户最常改的键：重命名、删除、新建、定位、搜索、刷新。
-- 目录/解析器/存储/设置页是一次性基础，后续 R2/R3 只是往目录里加条目，不需要重做。
+- R2a/R2b 在同一目录、解析器、存储和设置页上扩展；后续 R3 仍是插件与滚轮动作。
 
-**后续**
+**当前状态与后续**
 
-- R2：查看器媒体键 + 应用菜单命令（撤销/重做/复制/粘贴/全选/反选）+ macOS 原生菜单重建。
-- R3：鼠标/滚轮手势、插件快捷键只读/禁用，再评估插件改键。
+- R1、R2a、R2b 与全屏/导航/带修饰键鼠标侧键 follow-up 已实现并完成对应自动化。独立审查补充了所有媒体 dispatch 与全局缩放的活动模态框所有权守卫；同源 iframe 将带修饰侧键及原修饰键转发给顶层 matcher，同时保留裸侧键的 workspace history 行为；Windows catalog-driven IME Main 路由覆盖音频和视频播放/暂停，缺少 Main fallback 的 viewer action 拒绝裸字母绑定。macOS 原生菜单、Windows 中文输入法实机、Renderer-only seek/volume/fit E2E 及跨平台行为仍待人类/平台验收，详见开发日志与验收清单。
+- R3：插件快捷键只读/禁用和滚轮手势尚未实现，再评估插件改键。
 
 **验收**
 
 - 把「重命名」改成另一个未占用键，右键菜单标签、画布/侧栏按键、重启后都一致。
 - Windows 中文输入法下自定义 F2/Delete 仍生效，搜索框输入不被抢。
-- 冲突替换/取消符合预期。
+- 冲突提示阻止保存；改录未占用键后保存，取消录制保留原绑定。
 - 恢复默认回到目录默认键。
 
 ## 11. 测试计划
@@ -671,7 +669,7 @@ registerShortcutHandler(actionId, handler);
 
 ### 11.2 组件 / 集成测试
 
-- 设置页搜索、过滤、录制、取消、冲突替换、恢复单行/全部。
+- 设置页搜索、过滤、录制、取消、冲突提示与恢复单行/全部。
 - 菜单标签在改键后立即更新。
 - 输入框聚焦时自定义键不触发应用命令。
 - 查看器打开时视频键只触发播放器，不触发浏览画布。
@@ -682,7 +680,7 @@ registerShortcutHandler(actionId, handler);
 - 把「重命名」改成未占用键：右键菜单标签、侧栏/画布按键、重启后都一致。
 - Windows 中文输入法下：自定义 F2/Delete/视频字母键仍生效；搜索框输入不被抢。
 - macOS 原生菜单显示新键并能触发；输入框内 Cmd+C/Cmd+V 仍是文本编辑。
-- 冲突替换后旧动作不再占用该键；取消后原样。
+- 冲突时无法保存；换成未占用和弦后保存成功，取消录制则原绑定不变。
 - 恢复默认后回到目录默认键。
 - 插件快捷键冲突提示与禁用开关。
 - 同一键不会因为 Main 菜单和 Renderer 监听而执行两次。
@@ -698,8 +696,8 @@ registerShortcutHandler(actionId, handler);
 
 | 风险 | 影响 | 对策 |
 | --- | --- | --- |
-| macOS 原生菜单加速键抢在 Renderer 前 | 输入框内 Cmd+C 被应用命令拦截 | 上下文动作 `registerAccelerator: false`，由 Renderer 路由；文本编辑保留原生 |
-| Windows 隐藏菜单与 `before-input-event` 双触发 | 命令执行两次 | 保留并扩展现有 dedupe；每次只允许一个入口处理 |
+| macOS 原生菜单加速键抢在 Renderer 前 | 输入框内 Cmd+C 被应用命令拦截 | 文本焦点时复制/粘贴/全选命令转发到 Chromium 编辑操作；业务撤销/重做禁用 |
+| Windows 隐藏菜单与 `before-input-event` 双触发 | 命令执行两次 | 同 action 50ms 去重；Main matcher 和 Renderer matcher 忽略系统自动重复键 |
 | 输入法/键盘布局导致字母键失效 | 自定义键「时好时坏」 | 保存 `code`，匹配优先物理键；Main 侧 IME 兜底 |
 | 菜单、目录、处理器三处漂移 | 用户看到键但按不出来 | 覆盖率测试 + 单一目录；菜单 id 与 action id 对齐 |
 | 插件快捷键冲突 | 插件和内置命令同时触发 | 内置优先；设置页展示并允许禁用插件快捷键 |
@@ -719,8 +717,9 @@ registerShortcutHandler(actionId, handler);
 | 插件快捷键 | v1 只读展示 + 禁用开关；内置优先 | 不引入插件 manifest 改键协议；先解决冲突可见性 |
 | 撤销/重做/复制/粘贴/全选/反选 | 应用动作可配置；输入框聚焦时交给系统文本编辑 | 兼顾自定义与原生文本体验 |
 | 缩放 | 可配置（保留 Ctrl/Cmd + =/-/0 默认） | 键盘布局不同的用户可能需要换键 |
-| 窗口全屏 | 固定，不参与 v1 自定义 | 系统/浏览器习惯强，误改成本高 |
-| 查看器 Esc / ← / → | 固定 | 关闭与资产导航是结构键，避免和滑块/视频 seek 冲突 |
+| 窗口全屏 | 可自定义，Windows 默认 F11、macOS 默认 ⌃⌘F | 默认延续系统习惯；绑定和清除都必须同步原生/隐藏菜单，不能留 Electron role 的隐式 accelerator |
+| 查看器 Esc / ← / → | Esc 固定；←/→ 默认可自定义，鼠标后退/前进仅供上一项/下一项 | 保留导航默认并兼容侧键；文本、模态、查看器焦点和边界守卫优先 |
+| 鼠标侧键 | Mouse Back/Forward 加 Ctrl/Alt/Shift/Meta 至少一个修饰键，可绑定任何可自定义 action | 统一合成为带 MouseBack/MouseForward key 的事件供现有 matcher 分发；裸侧键拒绝并不覆盖浏览器 history；滚轮和中键仍固定 |
 | 导入/导出快捷键配置 | v1 支持 JSON 文件导入/导出 | 文件只包含覆盖表；导入前后做目录、保留键、固定动作和冲突校验 |
 | 跨设备/跨平台同步 | 不做；平台分开保存 | 系统保留键和键盘布局不同 |
 | 配置存储位置 | Main 的 `userData/shortcut-bindings.json` | 原生菜单和隐藏加速键启动时就需要 |
@@ -746,13 +745,13 @@ registerShortcutHandler(actionId, handler);
 - `tests/unit/shortcut-catalog.test.ts`
 - `tests/unit/shortcut-resolution.test.ts`
 - `tests/unit/shortcut-bindings.test.ts`
-- `tests/e2e/keyboard-shortcuts.test.ts`
+- `tests/e2e/custom-shortcut-runtime.test.ts`（Main 菜单同步、文本输入让键、viewer 媒体动作与重复触发）
 
 修改：
 
 - `src/shared/protocol/channels.ts`（get/set/context 通道）
 - `src/main/index.ts`（IPC、启动读取、菜单重建、before-input）
-- `src/main/application-menu.ts`（有效 accelerator、`registerAccelerator`）
+- `src/main/application-menu.ts`（由共享绑定生成原生菜单 accelerator）
 - `src/main/viewer-video-shortcut-menu.ts`（有效键、上下文启用）
 - `src/renderer/commands/command-registry.ts`（解析器驱动的菜单标签）
 - `src/renderer/commands/command-types.ts`（保留默认值/迁移字段）
@@ -777,9 +776,9 @@ registerShortcutHandler(actionId, handler);
 ## 15. 完成定义
 
 - 目录中的每个可配置动作都有默认键、作用域、展示名和完整分发入口。
-- 设置页可以搜索、录制、冲突替换、清除和恢复默认。
+- 设置页可以搜索、录制、显示冲突、清除和恢复默认；冲突时不能保存。
 - 改键后应用菜单、右键菜单、Renderer 键盘、Main 原生/隐藏加速键同时生效。
-- Windows 中文输入法、macOS 原生菜单、输入框焦点、查看器、侧栏焦点均通过真机验收。
+- Windows 中文输入法、macOS 原生菜单、非 QWERTY 键盘布局仍须真机验收；自动化证据和人类验收状态分开记录。
 - 保存后完全退出再打开，键位保持；损坏数据安全回退默认。
 - 没有幽灵快捷键、没有双触发、没有跨平台覆盖串写。
 
@@ -804,7 +803,7 @@ registerShortcutHandler(actionId, handler);
 | `canvas.zoom-in` | app | Ctrl+= | ⌘= | 是 | 允许 `+` / 小键盘 Add |
 | `canvas.zoom-out` | app | Ctrl+- | ⌘- | 是 | 允许 `_` / 小键盘 Subtract |
 | `canvas.zoom-reset` | app | Ctrl+0 | ⌘0 | 是 |  |
-| `window.toggle-fullscreen` | app | F11 | ⌃⌘F | 否 | 系统/浏览器习惯，固定 |
+| `window.toggle-fullscreen` | app | F11 | ⌃⌘F | 是 | 原生/隐藏菜单按有效绑定动态路由；清除时无 accelerator，菜单点击仍切换全屏 |
 | `asset.view` | browse | Enter（Space 别名） | Enter（Space 别名） | 是 | 打开查看器 |
 | `asset.open-external` | browse | Ctrl+O | ⌘O | 是 |  |
 | `asset.reveal-in-folder` | browse | Ctrl+Shift+S | ⌘⇧S | 是 |  |
@@ -826,8 +825,8 @@ registerShortcutHandler(actionId, handler);
 | `collection.rename` | sidebar | F2 | F2 | 是 |  |
 | `collection.delete` | sidebar | Delete | ⌘⌫ | 是 | 保留确认 |
 | `viewer.close` | viewer.base | Esc | Esc | 否 | 结构键，固定 |
-| `viewer.previous` | viewer.base | ← | ← | 否 | 资产导航，固定 |
-| `viewer.next` | viewer.base | → | → | 否 | 资产导航，固定 |
+| `viewer.previous` | viewer.base | ← | ← | 是 | 支持鼠标后退侧键；共享 matcher 路由 |
+| `viewer.next` | viewer.base | → | → | 是 | 支持鼠标前进侧键；共享 matcher 路由 |
 | `viewer.copy` | viewer.base | Ctrl+C | ⌘C | 是 | 复用 asset.copy 的绑定 |
 | `viewer.fit` | viewer.image/video | 小键盘 `.`（Space / F 别名） | 同左 | 是 | 序列播放器只用 F |
 | `viewer.volume-up` | viewer.base | ↑ | ↑ | 是 |  |

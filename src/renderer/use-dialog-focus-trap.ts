@@ -104,3 +104,8 @@ function getTopmostModal(): HTMLElement | null {
   ).filter((modal) => !modal.hidden && modal.getAttribute("aria-hidden") !== "true");
   return modals.at(-1) ?? null;
 }
+
+/** Ignore mounted-but-closed DialogShell instances when deciding key ownership. */
+export function hasActiveModalDialog(): boolean {
+  return getTopmostModal() !== null;
+}

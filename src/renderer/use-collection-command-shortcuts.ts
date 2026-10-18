@@ -6,7 +6,12 @@ import {
   type CommandPlatform,
   type ShortcutSpec,
 } from "./commands/command-types";
-import { matchesRuntimeShortcut } from "./shortcut-runtime";
+import {
+  asLegacyKeyboardShortcutEvent,
+  listenForShortcutInputs,
+  matchesRuntimeShortcut,
+} from "./shortcut-runtime";
+import type { ShortcutEventLike } from "../shared/shortcut-resolution";
 import {
   sidebarCommandDefinitions,
   type SidebarCommandDefinition,
@@ -32,14 +37,15 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 
 function matchCollectionShortcut(
   commandId: CollectionShortcutCommandId,
-  event: KeyboardEvent,
+  event: ShortcutEventLike,
   platform: CommandPlatform,
 ): boolean {
   const resolved = matchesRuntimeShortcut(commandId, event, platform);
   if (resolved !== null) return resolved;
   const spec: ShortcutSpec | undefined =
     collectionKeyboardCommandRegistry.get(commandId)?.shortcut;
-  return spec !== undefined && matchesShortcut(spec, event, platform);
+  const keyboardEvent = asLegacyKeyboardShortcutEvent(event);
+  return keyboardEvent !== null && spec !== undefined && matchesShortcut(spec, keyboardEvent, platform);
 }
 
 export type UseCollectionCommandShortcutsArgs = {
@@ -71,7 +77,7 @@ export function useCollectionCommandShortcuts(
   useEffect(() => {
     if (!enabled) return;
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onShortcutInput = (shortcutInput: ShortcutEventLike, event: KeyboardEvent | MouseEvent) => {
       if (isEditableKeyboardTarget(event.target)) return;
       if (previewOpen) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
@@ -87,27 +93,26 @@ export function useCollectionCommandShortcuts(
       )?.textContent?.trim();
       if (!name) return;
 
-      if (matchCollectionShortcut("collection.create-subcollection", event, platform)) {
+      if (matchCollectionShortcut("collection.create-subcollection", shortcutInput, platform)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         createSubcollection(collectionId);
         return;
       }
-      if (matchCollectionShortcut("collection.rename", event, platform)) {
+      if (matchCollectionShortcut("collection.rename", shortcutInput, platform)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         renameCollection(collectionId, name);
         return;
       }
-      if (matchCollectionShortcut("collection.delete", event, platform)) {
+      if (matchCollectionShortcut("collection.delete", shortcutInput, platform)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         deleteCollection(collectionId, name);
       }
     };
 
-    document.addEventListener("keydown", onKeyDown, platform === "windows");
-    return () => document.removeEventListener("keydown", onKeyDown, platform === "windows");
+    return listenForShortcutInputs(document, onShortcutInput, platform === "windows");
   }, [
     enabled,
     platform,
