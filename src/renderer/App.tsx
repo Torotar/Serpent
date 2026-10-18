@@ -714,6 +714,7 @@ type RendererWindow = Window & {
     plugins?: SerpentPluginManagerApi;
     mcp?: SerpentMcpSettingsApi;
     e2e?: {
+      useNativeAssetDrag?: boolean;
       getRequestCount: (type: string) => number;
     };
   };
@@ -14975,7 +14976,13 @@ function AppInner() {
                         const isE2e = Boolean(
                           (window as RendererWindow).serpent?.e2e,
                         );
-                        if (!isE2e && api && library) {
+                        const useNativeAssetDrag =
+                          !isE2e ||
+                          Boolean(
+                            (window as RendererWindow).serpent?.e2e
+                              ?.useNativeAssetDrag,
+                          );
+                        if (useNativeAssetDrag && api && library) {
                           // Electron's supported path is an asynchronous
                           // one-way IPC from dragstart. A synchronous round
                           // trip deadlocks when this native file drag returns
