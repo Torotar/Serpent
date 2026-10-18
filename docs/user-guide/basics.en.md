@@ -102,6 +102,10 @@ Supports marquee selection, `⌘`/`Ctrl` click to add, and `Shift` range selecti
 
 ![Library, Inspector, filters, and AI overview](../assets/ui/Serpent-Preview.png)
 
+![Browse settings](../assets/ui/settings-browse.en.png)
+
+*Settings → Browse switches between grid and masonry views and controls card fields, text alignment, and preview badges.*
+
 ## Viewer
 
 Double-click an asset to open the fullscreen viewer (press `Esc` to exit):
@@ -120,6 +124,14 @@ Double-click an asset to open the fullscreen viewer (press `Esc` to exit):
 - **Tags**: Add from the Inspector or context menu, with batch tagging across multiple assets; filter by tags in the search box or filter panel.
 - **Collections**: Curate assets across folders (an asset can belong to multiple collections); removing an asset from a collection or deleting a collection never deletes the underlying file. Opening a parent collection lets you toggle whether to include descendant assets.
 - **Smart collections**: Save custom search queries and structured filter criteria, automatically displaying matching assets whenever opened; right-click to edit rules.
+
+![Collection with tags in the Inspector](../assets/ui/collections-inspector.en.png)
+
+*With a collection open, the Inspector shows the selected asset's tags, rating, and description.*
+
+![Tag management](../assets/ui/tag-management.en.png)
+
+*Tag management lists, filters, and creates tags, with a usage count for each one.*
 
 ## Trash and deletion
 
@@ -141,6 +153,10 @@ Adjust the interface in **Settings → Appearance**. The switch on the theme row
 - **Themes**: Use a built-in theme, or edit colors and **Save as new theme**. Light and dark variants are edited separately. Deleting the custom theme that is in use returns the interface to the built-in theme it was based on.
 - **Background and opacity**: **App background** sets a background image and adjusts background opacity and panel opacity.
 - The same page also has font size, elevation, corner radius, and related appearance controls. They belong to the New UI appearance settings and are not separate features.
+
+![Appearance settings](../assets/ui/settings-appearance.en.png)
+
+*Settings → Appearance holds the New UI switch, light/dark/system mode, built-in themes, accent colors, and custom themes.*
 
 ## Launch at login
 
@@ -169,5 +185,9 @@ Adjust the interface in **Settings → Appearance**. The switch on the theme row
 | Delete from disk | ⌥⌘Delete | Shift+Delete |
 | Copy / Paste | ⌘C / ⌘V | Ctrl+C / Ctrl+V |
 | Fit viewer | Numpad `.` | Numpad `.` |
+
+![Shortcut settings](../assets/ui/settings-shortcuts.en.png)
+
+*Settings → Shortcuts lets you search actions or keys, rebind them, and review modified or conflicting entries.*
 
 See [Search and filters](search-and-filters.md) for query examples and [AI analysis](ai.md) for AI setup and jobs.

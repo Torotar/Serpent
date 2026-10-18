@@ -13,6 +13,10 @@ Scripts are useful for repeated organizing work, such as adding tags in bulk, ch
 
 Scripts modify a library only through the operations Serpent provides; they do not run arbitrary programs on your computer. Use scripts from sources you trust and back up important libraries before a large batch.
 
+![Automation script window](../assets/ui/automation-script.en.png)
+
+*Write or open a script in the Automation script window, review it, then run it.*
+
 ## Connect an external AI tool (MCP)
 
 MCP lets an external AI tool read and organize Serpent assets. It works on this computer and does not publish your library to the internet automatically.
