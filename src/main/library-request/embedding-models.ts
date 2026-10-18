@@ -12,8 +12,7 @@ import {
 } from "../embedding-model-catalog";
 import {
   EmbeddingInstallError,
-  embeddingSearchRoots,
-  inspectEmbeddingTree,
+  inspectManagedEmbeddingInstall,
   installEmbeddingFiles,
   installedSemanticModels,
   pinnedLlamaRuntimeAsset,
@@ -177,10 +176,7 @@ export async function tryHandleEmbeddingModelRequest(
 }
 
 function installStatus(runtime: EmbeddingModelRuntime): RendererResult {
-  const inspection = inspectEmbeddingTree(embeddingSearchRoots({
-    userData: runtime.userDataPath(),
-    home: runtime.homePath(),
-  }));
+  const inspection = inspectManagedEmbeddingInstall(runtime.userDataPath());
   const installed = new Set(installedSemanticModels(new Set(inspection.files.keys())));
   return {
     ok: true,
@@ -200,10 +196,7 @@ async function installModel(modelId: SemanticSearchModelId, runtime: EmbeddingMo
   const modelInstalled = current.models.some((model) => model.modelId === modelId && model.installed);
   if (modelInstalled && current.runtimeInstalled) return current;
   const destinationDir = path.join(runtime.userDataPath(), "embedding-models");
-  const inspection = inspectEmbeddingTree(embeddingSearchRoots({
-    userData: runtime.userDataPath(),
-    home: runtime.homePath(),
-  }));
+  const inspection = inspectManagedEmbeddingInstall(runtime.userDataPath());
   const emit = (progress: EmbeddingDownloadProgress): void => {
     runtime.onInstallProgress?.({
       modelId,
@@ -251,7 +244,6 @@ function uninstallModel(modelId: SemanticSearchModelId, runtime: EmbeddingModelR
   uninstallSemanticModelFiles({
     modelId,
     userDataPath: runtime.userDataPath(),
-    homePath: runtime.homePath(),
   });
   return installStatus(runtime);
 }

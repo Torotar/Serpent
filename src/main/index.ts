@@ -81,8 +81,7 @@ import { tryHandleEmbeddingModelRequest } from "./library-request/embedding-mode
 import { EmbeddingTestIndex } from "./embedding-test-index";
 import { EmbeddingHttpIndex } from "./embedding-http-index";
 import {
-  embeddingSearchRoots,
-  inspectEmbeddingTree,
+  inspectManagedEmbeddingInstall,
   resolveInstalledEmbeddingLayout,
 } from "./embedding-install";
 import {
@@ -595,10 +594,10 @@ function embeddingIndex(): EmbeddingTestIndex {
       if (!workerClient) return Promise.reject(new Error("Library Worker is unavailable."));
       return workerClient.request(command);
     },
-    installedLayout: (modelId) => resolveInstalledEmbeddingLayout(inspectEmbeddingTree(embeddingSearchRoots({
-      userData: app.getPath("userData"),
-      home: app.getPath("home"),
-    })), modelId),
+    installedLayout: (modelId) => resolveInstalledEmbeddingLayout(
+      inspectManagedEmbeddingInstall(app.getPath("userData")),
+      modelId,
+    ),
     resolveMediaBinaries: resolveHostMediaBinaries,
   });
   return embeddingTestIndex;
