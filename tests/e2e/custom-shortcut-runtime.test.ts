@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -25,35 +25,51 @@ const ffmpegPath = path.join(
   process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
 );
 
+const fixtureColors: Record<string, [number, number, number]> = {
+  teal: [0, 128, 128],
+  purple: [128, 0, 128],
+};
+
+// Bundled release ffmpeg builds omit the lavfi device, so synthesize raw
+// frames and PCM audio in-process and feed them through raw demuxers.
 function generateVideoFixture(outputPath: string, color: string): void {
-  execFileSync(ffmpegPath, [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    `color=c=${color}:s=320x180:r=30:d=6`,
-    "-f",
-    "lavfi",
-    "-i",
-    "sine=frequency=440:sample_rate=48000:duration=6",
-    "-c:v",
-    "libvpx",
-    "-deadline",
-    "realtime",
-    "-cpu-used",
-    "8",
-    "-b:v",
-    "300k",
-    "-c:a",
-    "libopus",
-    "-b:a",
-    "64k",
-    "-shortest",
-    outputPath,
-  ], { timeout: 60_000 });
+  const [r, g, b] = fixtureColors[color] ?? [128, 128, 128];
+  const width = 320;
+  const height = 180;
+  const fps = 30;
+  const seconds = 6;
+  const frame = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < frame.length; i += 3) {
+    frame[i] = r;
+    frame[i + 1] = g;
+    frame[i + 2] = b;
+  }
+  const videoRawPath = `${outputPath}.rgb`;
+  writeFileSync(videoRawPath, Buffer.concat(Array(fps * seconds).fill(frame)));
+  const sampleRate = 48_000;
+  const audio = Buffer.alloc(sampleRate * seconds * 2);
+  for (let i = 0; i < sampleRate * seconds; i += 1) {
+    audio.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 8000), i * 2);
+  }
+  const audioRawPath = `${outputPath}.pcm`;
+  writeFileSync(audioRawPath, audio);
+  try {
+    execFileSync(ffmpegPath, [
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", `${width}x${height}`, "-r", String(fps),
+      "-i", videoRawPath,
+      "-f", "s16le", "-ar", String(sampleRate), "-ac", "1",
+      "-i", audioRawPath,
+      "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-b:v", "300k",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "libopus", "-b:a", "64k",
+      "-shortest",
+      outputPath,
+    ], { timeout: 60_000 });
+  } finally {
+    rmSync(videoRawPath, { force: true });
+    rmSync(audioRawPath, { force: true });
+  }
 }
 
 async function menuItemState(
