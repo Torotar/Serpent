@@ -139,6 +139,9 @@
   --shell-workspace-bar-height: 40px;
   --shell-control-height: 28px;
   --shell-chip-height: 22px;
+  /* Matches .toolbar-nav-cluster .library-switcher max-width. The collapsed
+     nav cluster is taken out of flow, so the browse row reserves this width. */
+  --shell-library-switcher-width: 170px;
 }
 
 /* Windows UI: bundled HarmonyOS Sans SC (Regular–Black). Vite injects
@@ -1271,8 +1274,8 @@ body.platform-darwin .app-shell.left-collapsed .toolbar-workspace-cluster {
 /* Toolbar placement (beside the panel toggle): a bounded width keeps the tabs
    from being squeezed, and the whole row is clickable. */
 .toolbar-nav-cluster .library-switcher {
-  flex: 0 1 170px;
-  max-width: 170px;
+  flex: 0 1 var(--shell-library-switcher-width);
+  max-width: var(--shell-library-switcher-width);
 }
 
 .toolbar-nav-cluster .library-switcher-trigger {
@@ -18078,6 +18081,32 @@ html.serpent-window-square {
 .app-shell[data-shell-layout="islands"]:not(.right-collapsed) .toolbar-workspace-cluster:has(.workspace-tabs) {
   padding-right: var(--island-gap);
 }
+/* The shell's first column is 0 when the sidebar is collapsed, and a fixed
+   reservation left a wide hole after a short library name. Give the toolbar
+   its own leading column sized to the name, so history and tabs sit against it. */
+.app-shell[data-shell-layout="islands"].left-collapsed > .app-toolbar {
+  grid-template-columns: max-content minmax(0, 1fr) var(--inspector-width, 268px);
+}
+.app-shell[data-shell-layout="islands"].left-collapsed.right-collapsed > .app-toolbar {
+  grid-template-columns: max-content minmax(0, 1fr) 0;
+}
+.app-shell[data-shell-layout="islands"].left-collapsed .toolbar-nav-cluster {
+  position: static;
+  left: auto;
+  width: auto;
+  padding-left: var(--island-outer-gap);
+}
+.app-shell[data-shell-layout="islands"].left-collapsed .toolbar-nav-cluster .library-switcher {
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: var(--shell-library-switcher-width);
+}
+.app-shell[data-shell-layout="islands"].left-collapsed .toolbar-nav-cluster .library-switcher-trigger {
+  width: auto;
+}
+.app-shell[data-shell-layout="islands"].left-collapsed .toolbar-workspace-cluster {
+  padding-left: 8px;
+}
 
 
 /* ==== a79: pin filter bar to second row ===================================
@@ -18261,14 +18290,18 @@ html.serpent-window-square {
    (`.app-shell[islands] .toolbar-nav-cluster { padding-left: outer-gap }`)
    outrank it, so the sidebar toggle sat under the traffic lights.
    Lights: x 14→66 (trafficLightPosition x14), so reserve 78px (12px clear).
-   Collapsed: base CSS already moves the cluster to left:78px — drop the
-   extra outer gap there so toggle x matches the expanded state.
+   Collapsed: the leading cluster is back in flow, so the same 78px padding
+   clears the lights. Drop the fixed browse-row reservation or the tabs sit
+   a switcher-width too far right.
    Custom caption buttons render only on Windows (App.tsx), unchanged. */
 body.platform-darwin .app-shell[data-shell-layout="islands"] .toolbar-nav-cluster {
   padding-left: 78px;
 }
 body.platform-darwin .app-shell[data-shell-layout="islands"].left-collapsed .toolbar-nav-cluster {
-  padding-left: 0;
+  padding-left: 78px;
+}
+body.platform-darwin .app-shell[data-shell-layout="islands"].left-collapsed .toolbar-workspace-cluster {
+  padding-left: 8px;
 }
 /* The 78px inset narrows the cluster; keep the toggle square, let the
    library switcher truncate instead. */
