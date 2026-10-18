@@ -38,6 +38,10 @@ name:"hero concept" -tag:草图 | author:Jane
 
 ![搜索帮助与过滤入口](../assets/ui/filter-panel.png)
 
+![使用高级语法搜索](../assets/ui/search-syntax.png)
+
+*示例：`tag:光影 -tag:城市` 只显示带「光影」标签且不带「城市」标签的资产。*
+
 ## 过滤
 
 过滤器在搜索框旁的「过滤」按钮中，按维度组织；多个维度同时启用时按 AND 组合。同一维度的多个值按 OR 组合。当前维度包括：

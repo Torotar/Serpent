@@ -38,6 +38,10 @@ This means “the file name contains hero concept and is not tagged sketch, or t
 
 ![Search help and filter entry point](../assets/ui/filter-panel.png)
 
+![Searching with advanced syntax](../assets/ui/search-syntax.en.png)
+
+*Example: `tag:Lighting -tag:Urban` shows only assets tagged Lighting and not tagged Urban.*
+
 ## Filters
 
 Open the **Filters** button beside the search field. Different dimensions combine with AND; multiple values within one dimension combine with OR. Available dimensions include:
