@@ -49986,6 +49986,8 @@ export class LibraryService {
       }
 
       // Finalize the archive (wait for the output stream to finish).
+      const finalArchive = archive;
+      const finalOutput = output;
       await new Promise<void>((resolve, reject) => {
         let settled = false;
         const settle = (operation: () => void): void => {
@@ -49995,27 +49997,27 @@ export class LibraryService {
           operation();
         };
         cancelState.onCancel = () => {
-          archive.abort();
-          output.destroy();
+          finalArchive.abort();
+          finalOutput.destroy();
         };
-        output.on('close', () => {
+        finalOutput.on('close', () => {
           if (cancelState.cancelled) settle(() => reject(new LibraryServiceError('CANCELLED')));
         });
-        output.on('finish', () => {
+        finalOutput.on('finish', () => {
           if (archiverError) {
             settle(() => reject(new LibraryServiceError('LIBRARY_NOT_WRITABLE', { cause: archiverError })));
             return;
           }
           settle(resolve);
         });
-        output.on('error', (err: Error) => {
+        finalOutput.on('error', (err: Error) => {
           if (cancelState.cancelled) {
             settle(() => reject(new LibraryServiceError('CANCELLED', { cause: err })));
             return;
           }
           settle(() => reject(new LibraryServiceError('LIBRARY_NOT_WRITABLE', { cause: err })));
         });
-        void archive.finalize();
+        void finalArchive.finalize();
       });
 
       // Clean up temp dir.
