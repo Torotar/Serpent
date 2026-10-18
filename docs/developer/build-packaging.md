@@ -92,6 +92,7 @@ npm run release:make            # 优先 docker，并重命名为 Serpent-linux-
 ```
 
 - linux-x64 与 linux-arm64 都内置与 macOS/Windows 相同的 pinned media bundle（`ffmpeg` / `ffprobe` / `oiiotool`）。`package` 的 `prePackage` 会执行 `media:ensure`。`bundle-lock.json` 里 linux-x64 目前为 `ready`。linux-arm64 仍是 `build-required`：`media-v0.1.2` 没有 `serpent-media-linux-arm64.zip`，在原生 aarch64 上跑 `scripts/media-build/linux-arm64.sh`、上传 zip 并写回 URL 与 SHA-256 之前，`media:acquire` 会失败，发不出现成 AppImage。本地试跑可用 `SERPENT_MEDIA_SKIP_PROVENANCE=1` 或 `--build-media-locally`。
+- Linux media bundle 必须在 `ubuntu:22.04` 容器内用 `scripts/media-build/linux-*.sh` 构建（系统自带 GCC），保证 `ffmpeg`/`ffprobe`/`oiiotool` 最高只依赖 GLIBC 2.35，与 AppImage 的 22.04 基线一致；发布前用 `objdump -T <bin> | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1` 核对。linux-x64 当前为 `media-v0.1.3`（22.04 重建，源与配置同 `media-v0.1.2`）。
 - glibc 基线与 x86_64 相同（Ubuntu 22.04 / 2.35）。需要 FUSE（`libfuse2`）；无 FUSE 时 `--appimage-extract-and-run`。X11 / Wayland 限制与 x86_64 相同。
 - Release 上传名与应用内更新器一致：`Serpent-linux-x86-64-<ver>.AppImage` 或 `Serpent-linux-arm64-<ver>.AppImage`（另附同名 `.sha256`）。校验清单为 `SHA256SUMS-linux-x64.txt` / `SHA256SUMS-linux-arm64.txt`。
 
