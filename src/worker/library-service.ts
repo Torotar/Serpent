@@ -5463,8 +5463,19 @@ interface ActiveImportTransfer {
  * Use a zero-delay timer, not setImmediate: setImmediate can keep running in
  * the same check phase and starve parentPort messages (the same reason
  * navigationCheckpoint uses setTimeout).
+ *
+ * On Windows the timer floor is about 15ms. Yielding once per file therefore
+ * turns a 20,000-file transfer into more than ten minutes of waits. Yield
+ * only after a short slice of real work so cancellation and Worker IPC still
+ * run, without paying that floor on every entry.
  */
+const transferYieldSliceMs = 50;
+let nextTransferYieldAt = 0;
+
 function transferCheckpoint(): Promise<void> {
+  const now = Date.now();
+  if (now < nextTransferYieldAt) return Promise.resolve();
+  nextTransferYieldAt = now + transferYieldSliceMs;
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
@@ -49666,6 +49677,14 @@ export class LibraryService {
     let tempDbPath: string | undefined;
     let tempDirOwned = false;
     let destinationOwned = false;
+    let output: ReturnType<typeof createWriteStream> | undefined;
+    let archive: {
+      pipe(output: ReturnType<typeof createWriteStream>): void;
+      file(path: string, options: { name: string }): void;
+      finalize(): void;
+      abort(): void;
+      on(event: string, listener: (err: Error) => void): void;
+    } | undefined;
 
     function countFilesRecursive(dirPath: string): number {
       let count = 0;
@@ -49873,17 +49892,10 @@ export class LibraryService {
       });
 
       // Dynamically import archiver (CJS module).
-      interface ZipArchiverInstance {
-        pipe(output: ReturnType<typeof createWriteStream>): void;
-        file(path: string, options: { name: string }): void;
-        finalize(): void;
-        abort(): void;
-        on(event: string, listener: (err: Error) => void): void;
-      }
       // archiver v8 exports named classes; ZipArchive is the ZIP-specific one.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const archiverModule = require('archiver') as {
-        ZipArchive: new (options?: Record<string, unknown>) => ZipArchiverInstance;
+        ZipArchive: new (options?: Record<string, unknown>) => NonNullable<typeof archive>;
       };
 
       const destZipPath = input.destinationPath;
@@ -49903,8 +49915,8 @@ export class LibraryService {
         throw new LibraryServiceError('LIBRARY_NOT_WRITABLE', { cause: error });
       }
 
-      const output = createWriteStream(destZipPath);
-      const archive = new archiverModule.ZipArchive({ zlib: { level: 6 }, forceZip64: false });
+      output = createWriteStream(destZipPath);
+      archive = new archiverModule.ZipArchive({ zlib: { level: 6 }, forceZip64: false });
 
       let archiverError: Error | undefined;
       archive.on('error', (err: Error) => {
@@ -50043,6 +50055,15 @@ export class LibraryService {
           phase: 'cancelled', filesProcessed: 0, totalFiles: 0,
           bytesProcessed: 0, totalBytes: 0,
         });
+      }
+      // The compress loop can fail while archiver still holds the destination
+      // and the snapshot. Windows will not remove those paths, or their parent,
+      // until the handles close.
+      if (output) {
+        const outputClosed = waitForStreamClose(output);
+        try { archive?.abort(); } catch { /* the export is already failing */ }
+        output.destroy();
+        await outputClosed;
       }
       if (destinationOwned) {
         this.removeOwnedTransferPath('export.zip.failure.cleanup-destination', input.destinationPath, false);
