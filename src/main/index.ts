@@ -499,6 +499,8 @@ import {
   type SaveUploadDisposition,
   type SaveUploadRequest,
   type ListFoldersDisposition,
+  extensionCollectionSummaries,
+  type ListCollectionsDisposition,
 } from "./extension-server";
 import {
   readExtensionBrowseFolderIds,
@@ -2337,6 +2339,47 @@ async function handleListFolders(): Promise<ListFoldersDisposition> {
   };
 }
 
+async function handleListCollections(): Promise<ListCollectionsDisposition> {
+  if (!workerClient) {
+    return { ok: false, status: 503, reason: "worker unavailable" };
+  }
+
+  const saveContext = getExtensionSaveContext();
+  if (!saveContext) {
+    return { ok: false, status: 503, reason: "no active library" };
+  }
+
+  const result = await workerClient.request({
+    type: "collection.list",
+    libraryId: saveContext.libraryId,
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      status: result.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
+      reason: result.error.reason ?? result.error.code,
+    };
+  }
+  if (result.type !== "collection.list") {
+    return { ok: false, status: 500, reason: "unexpected worker response" };
+  }
+
+  let libraryDisplayName = "Serpent";
+  const librariesResult = await workerClient.request({ type: "library.list" });
+  if (librariesResult.ok && librariesResult.type === "library.list") {
+    const match = librariesResult.libraries.find(
+      (library) => library.libraryId === saveContext.libraryId,
+    );
+    if (match?.displayName) libraryDisplayName = match.displayName;
+  }
+
+  return {
+    ok: true,
+    libraryDisplayName,
+    collections: extensionCollectionSummaries(result.collections),
+  };
+}
+
 async function handleSaveIntent(
   intent: SaveIntent,
 ): Promise<SaveIntentDisposition> {
@@ -2436,8 +2479,9 @@ async function handleSaveUpload(
     return { accepted: false, status: 503, reason: "no active library" };
   }
 
-  const targetFolderId =
-    upload.targetFolderId !== undefined
+  const targetFolderId = upload.targetCollectionId
+    ? undefined
+    : upload.targetFolderId !== undefined
       ? upload.targetFolderId ?? undefined
       : saveContext.selectedFolderId;
 
@@ -2471,6 +2515,24 @@ async function handleSaveUpload(
     }
     if (result.type !== "extension.asset-saved") {
       return { accepted: false, status: 500, reason: "unexpected worker response" };
+    }
+    if (upload.targetCollectionId) {
+      const added = await workerClient.request({
+        type: "collection.assets.add",
+        libraryId: saveContext.libraryId,
+        collectionId: upload.targetCollectionId,
+        assetIds: [result.asset.assetId],
+      });
+      if (!added.ok || added.type !== "collection.assets.added") {
+        const detail = added.ok
+          ? "unexpected worker response"
+          : added.error.reason ?? added.error.code;
+        return {
+          accepted: false,
+          status: !added.ok && added.error.code === "LIBRARY_NOT_OPEN" ? 503 : 422,
+          reason: `未能加入合集：${detail}`,
+        };
+      }
     }
     logger?.info("extension-server.save-upload", "Asset saved successfully.", {
       type: result.type,
@@ -6917,6 +6979,7 @@ async function startApplication(): Promise<void> {
       port: 19876,
       uploadStagingRoot: app.getPath("temp"),
       onListFolders: handleListFolders,
+      onListCollections: handleListCollections,
       onSaveIntent: handleSaveIntent,
       onSaveUpload: handleSaveUpload,
       onError: (err) => logger?.error("extension-server", err),
