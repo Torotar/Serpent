@@ -27,6 +27,11 @@ export const APP_UPDATE_CANCEL_CHANNEL = 'serpent:app-update:cancel' as const;
 /** Main → Renderer: update download/install progress for the About dialog. */
 export const APP_UPDATE_PROGRESS_CHANNEL = 'serpent:app-update:progress' as const;
 /** Renderer → Main: read launch-at-login preferences. */
+export const SHORTCUT_BINDINGS_GET_CHANNEL = 'serpent:shortcuts:get' as const;
+export const SHORTCUT_BINDINGS_SET_CHANNEL = 'serpent:shortcuts:set' as const;
+export const SHORTCUT_BINDINGS_EXPORT_CHANNEL = 'serpent:shortcuts:export' as const;
+export const SHORTCUT_BINDINGS_IMPORT_CHANNEL = 'serpent:shortcuts:import' as const;
+
 export const STARTUP_PREFERENCES_GET_CHANNEL = 'serpent:startup-preferences:get' as const;
 /** Renderer → Main: persist launch-at-login preferences. */
 export const STARTUP_PREFERENCES_SET_CHANNEL = 'serpent:startup-preferences:set' as const;
@@ -65,6 +70,7 @@ export const LINKED_MISSING_VISIBILITY_CHANNEL =
   'serpent:shell:linked-missing-visibility' as const;
 /** Renderer → Main: fall back to Chromium text copy when no asset file copy. */
 export const NATIVE_EDIT_COPY_CHANNEL = 'serpent:shell:native-edit-copy' as const;
+export const NATIVE_EDIT_COMMAND_CHANNEL = 'serpent:shell:native-edit-command' as const;
 export const WINDOW_MAXIMIZED_CHANNEL =
   'serpent:shell:window-maximized' as const;
 /** Main → Renderer: BrowserWindow focus state (macOS traffic lights / shell chrome). */
@@ -81,6 +87,9 @@ export const BROWSE_SHORTCUT_CHANNEL =
 /** Renderer → Main: disable hidden F2/Delete accelerators in text fields. */
 export const BROWSE_SHORTCUT_MENU_ENABLED_CHANNEL =
   'serpent:shell:browse-shortcut-menu-enabled' as const;
+/** Renderer → Main: enable app accelerators independently of browse/viewer scope. */
+export const APPLICATION_SHORTCUTS_ENABLED_CHANNEL =
+  'serpent:shell:application-shortcuts-enabled' as const;
 
 /** Renderer Desktop Console → Main-owned Automation Execution/Gateway bridge. */
 export const AUTOMATION_SCRIPT_OPEN_CHANNEL = 'serpent:automation:script-open' as const;

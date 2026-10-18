@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import type { Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 
 export const MAX_LEGACY_SEMANTIC_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_LEGACY_ENTRY_BYTES = 1024 * 1024;
@@ -22,13 +23,23 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 export async function digestLegacySemanticCache(filePath: string): Promise<{ digest: string; bytes: number }> {
   const hash = createHash('sha256');
   let bytes = 0;
-  for await (const chunk of createReadStream(filePath)) {
-    const buffer = Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > MAX_LEGACY_SEMANTIC_CACHE_BYTES) throw new Error('Legacy semantic cache exceeds its size limit.');
-    hash.update(buffer);
+  const stream = createReadStream(filePath);
+  try {
+    for await (const chunk of stream) {
+      const buffer = Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > MAX_LEGACY_SEMANTIC_CACHE_BYTES) throw new Error('Legacy semantic cache exceeds its size limit.');
+      hash.update(buffer);
+    }
+    return { digest: hash.digest('hex'), bytes };
+  } finally {
+    await closeReadStream(stream);
   }
-  return { digest: hash.digest('hex'), bytes };
+}
+
+async function closeReadStream(stream: Readable): Promise<void> {
+  stream.destroy();
+  await finished(stream).catch(() => undefined);
 }
 
 /** Parse only the bounded entries array; never materialize the whole legacy file. */
@@ -63,6 +74,7 @@ export async function parseLegacySemanticCache(
       }
     }
   };
+  try {
   for await (const rawChunk of stream) {
     const text = String(rawChunk);
     totalBytes += Buffer.byteLength(text);
@@ -139,4 +151,7 @@ export async function parseLegacySemanticCache(
     throw new Error('Legacy semantic cache is incomplete.');
   }
   return entryCount;
+  } finally {
+    await closeReadStream(stream);
+  }
 }

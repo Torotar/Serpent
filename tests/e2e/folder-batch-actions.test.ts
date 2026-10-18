@@ -151,6 +151,49 @@ test("ctrl-click includes the folder currently being browsed", async () => {
     await expect(multiSelected).toHaveCount(2);
     await expect(row("CurA")).toHaveClass(/is-multi-selected/u);
     await expect(row("CurB")).toHaveClass(/is-multi-selected/u);
+
+    // 用户反馈（2026-10-17）：选中态的高亮必须和「当前浏览文件夹」是同一条矩形，
+    // 且不要描边，只用背景色。所有状态都画在行容器 .nav-tree-row 上，内层按钮保持
+    // 透明——按钮被展开箭头列和层级缩进往里推，画在它上面会比当前文件夹窄一条。
+    const rowSurface = (name: string) =>
+      window.evaluate((label) => {
+        const button = document.querySelector<HTMLElement>(
+          `.navigation-pane button.nav-row[data-hover-tip="${label}"]`,
+        );
+        const treeRow = button?.parentElement;
+        const style = (element: Element | null | undefined) =>
+          element ? getComputedStyle(element as HTMLElement) : null;
+        return {
+          buttonBackground: style(button)?.backgroundColor ?? "",
+          buttonWidth: button?.getBoundingClientRect().width ?? 0,
+          rowBackground: style(treeRow)?.backgroundColor ?? "",
+          rowShadow: style(treeRow)?.boxShadow ?? "",
+          rowWidth: treeRow?.getBoundingClientRect().width ?? 0,
+        };
+      }, name);
+
+    const browsedAndSelected = await rowSurface("CurA");
+    const onlySelected = await rowSurface("CurB");
+    for (const surface of [browsedAndSelected, onlySelected]) {
+      expect(surface.rowBackground).not.toBe("rgba(0, 0, 0, 0)");
+      expect(surface.buttonBackground).toBe("rgba(0, 0, 0, 0)");
+      expect(surface.rowWidth).toBeGreaterThan(surface.buttonWidth);
+      // 选中态只有背景色，不加描边。
+      expect(surface.rowShadow).toBe("none");
+    }
+    // 同一层级的两行：高亮矩形同宽同起点。
+    expect(browsedAndSelected.rowWidth).toBe(onlySelected.rowWidth);
+    // 既在浏览又被选中时用的是「选中」的底色，而不是当前浏览的中性底色，
+    // 因此它与另一条纯选中行的背景色应当一致。
+    expect(browsedAndSelected.rowBackground).toBe(onlySelected.rowBackground);
+
+    // 悬停同样必须落在行容器上，否则 hover 会比当前文件夹窄一条。
+    await row("CurC").hover();
+    const hovered = await rowSurface("CurC");
+    expect(hovered.rowBackground).not.toBe("rgba(0, 0, 0, 0)");
+    expect(hovered.buttonBackground).toBe("rgba(0, 0, 0, 0)");
+    expect(hovered.rowWidth).toBeGreaterThan(hovered.buttonWidth);
+    await window.mouse.move(0, 0);
     // 批量菜单一次覆盖两个文件夹（不去执行，避免删掉正在浏览的 CurA）。
     await row("CurB").click({ button: "right" });
     await expect(window.getByRole("menuitem", { name: "忽略（2 项）" })).toBeVisible();

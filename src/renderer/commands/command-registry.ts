@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { formatShortcut, GROUP_ORDER } from './command-types';
+import { formatRuntimeShortcut } from '../shortcut-runtime';
 import type {
   CommandContext,
   CommandDefinition,
@@ -52,9 +53,10 @@ export function createCommandRegistry<
           label: typeof def.title === 'function' ? def.title(ctx) : def.title,
           group: def.group,
           shortcutLabel:
-            def.shortcut !== undefined
+            formatRuntimeShortcut(def.id, ctx.platform)
+            ?? (def.shortcut !== undefined
               ? formatShortcut(def.shortcut, ctx.platform)
-              : null,
+              : null),
           disabled: reason !== null,
           disabledReason: reason,
         });

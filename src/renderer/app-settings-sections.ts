@@ -38,6 +38,7 @@ export type AppSettingsCategoryId =
   | "assets"
   | "appearance"
   | "browse"
+  | "shortcuts"
   | "ai"
   | "semantic-search"
   | "mcp"
@@ -58,6 +59,7 @@ export type AppSettingsCategory = {
     | "settings.categoryAssets"
     | "settings.categoryAppearance"
     | "settings.categoryBrowse"
+    | "settings.categoryShortcuts"
     | "settings.categoryAi"
     | "settings.categorySemanticSearch"
     | "settings.categoryMcp"
@@ -85,6 +87,11 @@ export const APP_SETTINGS_CATEGORIES: readonly AppSettingsCategory[] = [
     id: "browse",
     icon: "grid",
     labelKey: "settings.categoryBrowse",
+  },
+  {
+    id: "shortcuts",
+    icon: "sliders",
+    labelKey: "settings.categoryShortcuts",
   },
   {
     id: "ai",

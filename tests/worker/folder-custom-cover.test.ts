@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { assetParentFolderCoverTarget } from "../../src/shared/folder-cover-target";
 import { LibraryService } from "../../src/worker/library-service";
+import { removePathWithSyncRetry } from "../../src/worker/windows-fs-retry";
 
 const require = createRequire(import.meta.url);
 const TestDatabase = require("better-sqlite3") as new (filename: string) => {
@@ -15,6 +16,7 @@ const TestDatabase = require("better-sqlite3") as new (filename: string) => {
 };
 
 const roots: string[] = [];
+const services: LibraryService[] = [];
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
@@ -24,6 +26,7 @@ function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), "serpent-folder-cover-"));
   roots.push(root);
   const service = new LibraryService();
+  services.push(service);
   const library = service.createLibrary({
     displayName: "Covers",
     selectedParentPath: root,
@@ -32,7 +35,8 @@ function fixture() {
 }
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { force: true, recursive: true });
+  for (const service of services.splice(0)) service.closeAll();
+  for (const root of roots.splice(0)) removePathWithSyncRetry(root);
 });
 
 describe("folder custom covers", () => {

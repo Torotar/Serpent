@@ -14,6 +14,7 @@ import { InspectorCardFeelProvider } from './InspectorCardFeelProvider';
 import { LocaleProvider } from './i18n';
 import { MenuAcrylicProvider } from './MenuAcrylicProvider';
 import { RadiusProvider } from './RadiusProvider';
+import { ShortcutProvider } from './shortcut-provider';
 import { applyRendererPlatform } from './renderer-platform';
 import {
   applyMenuAcrylicPreferences,
@@ -63,7 +64,9 @@ createRoot(root).render(
             <RadiusProvider>
               <MenuAcrylicProvider>
                 <InspectorCardFeelProvider>
-                  <App />
+                  <ShortcutProvider>
+                    <App />
+                  </ShortcutProvider>
                 </InspectorCardFeelProvider>
               </MenuAcrylicProvider>
             </RadiusProvider>

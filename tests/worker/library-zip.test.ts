@@ -20,6 +20,7 @@ import {
   LibraryService,
   LibraryServiceError,
 } from '../../src/worker/library-service';
+import { removePathWithSyncRetry } from '../../src/worker/windows-fs-retry';
 
 const temporaryRoots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -89,7 +90,7 @@ async function expectRejectReasonAsync(
 afterEach(() => {
   for (const service of services.splice(0)) service.closeAll();
   for (const root of temporaryRoots.splice(0)) {
-    rmSync(root, { force: true, recursive: true });
+    removePathWithSyncRetry(root);
   }
 });
 
