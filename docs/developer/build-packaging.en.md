@@ -94,6 +94,7 @@ npm run release:make            # prefers docker and renames to Serpent-linux-x8
 ```
 
 - linux-x64 and linux-arm64 ship the same pinned media bundle contract as macOS/Windows (`ffmpeg` / `ffprobe` / `oiiotool`). `package` runs `media:ensure` in `prePackage`. linux-x64 is `ready` in `bundle-lock.json`. linux-arm64 is still `build-required`: `media-v0.1.2` has no `serpent-media-linux-arm64.zip`. Until `scripts/media-build/linux-arm64.sh` runs on native aarch64 and the URL plus SHA-256 are written back, `media:acquire` fails closed and a release AppImage cannot be produced. Local trials can set `SERPENT_MEDIA_SKIP_PROVENANCE=1` or pass `--build-media-locally`.
+- Build Linux media bundles inside an `ubuntu:22.04` container with `scripts/media-build/linux-*.sh` (stock GCC) so `ffmpeg`/`ffprobe`/`oiiotool` need at most GLIBC 2.35, matching the AppImage's 22.04 baseline. Check with `objdump -T <bin> | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1` before publishing. linux-x64 is currently `media-v0.1.3` (22.04 rebuild, same sources/config as `media-v0.1.2`).
 - The glibc baseline matches x86_64 (Ubuntu 22.04 / 2.35). Needs FUSE (`libfuse2`); without FUSE use `--appimage-extract-and-run`. X11 / Wayland limits match x86_64.
 - Release upload names match the in-app updater: `Serpent-linux-x86-64-<ver>.AppImage` or `Serpent-linux-arm64-<ver>.AppImage` (plus a sibling `.sha256`). Checksum manifests are `SHA256SUMS-linux-x64.txt` / `SHA256SUMS-linux-arm64.txt`.
 
