@@ -1,0 +1,77 @@
+{
+  "experiment": "isolated SQLite path lookup/index construction microbenchmark",
+  "fixture": {
+    "database": ":memory:",
+    "assets": 20000,
+    "managedAssets": 18000,
+    "linkedAssets": 2000,
+    "revisions": 20000,
+    "missingLookups": 400,
+    "deletedRows": 0
+  },
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "24.18.0",
+    "modules": "148",
+    "betterSqlite3Sqlite": "3.53.2",
+    "nodeBuiltinSqlite": "3.53.1"
+  },
+  "ddlIndexes": [
+    {
+      "name": "assets_linked_path_identity_unique",
+      "sql": "CREATE UNIQUE INDEX assets_linked_path_identity_unique\n      ON assets(linked_folder_id, path_identity) WHERE location_kind = 'linked'"
+    },
+    {
+      "name": "assets_managed_path_identity_unique",
+      "sql": "CREATE UNIQUE INDEX assets_managed_path_identity_unique\n      ON assets(path_identity) WHERE location_kind = 'managed'"
+    },
+    {
+      "name": "revisions_asset_accepted_idx",
+      "sql": "CREATE INDEX revisions_asset_accepted_idx\n      ON revisions(asset_id, accepted_at)"
+    },
+    {
+      "name": "sqlite_autoindex_assets_1",
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_revisions_1",
+      "sql": null
+    }
+  ],
+  "queryPlans": {
+    "sourceResolveImportPathLookup": {
+      "sql": "SELECT asset_id, current_revision_id FROM assets WHERE path_identity = ?",
+      "plan": [
+        "SCAN assets"
+      ]
+    },
+    "managedPredicateCandidate": {
+      "sql": "SELECT asset_id, current_revision_id FROM assets WHERE path_identity = ? AND location_kind = 'managed'",
+      "plan": [
+        "SEARCH assets USING INDEX assets_managed_path_identity_unique (path_identity=?)"
+      ]
+    },
+    "destinationMapMaterialization": {
+      "sql": "SELECT a.path_identity AS path_identity,\n           a.relative_file_path AS relative_file_path,\n           r.byte_size AS byte_size\n      FROM assets a\n      LEFT JOIN revisions r ON r.revision_id = a.current_revision_id\n     WHERE a.deleted_at IS NULL",
+      "plan": [
+        "SCAN a",
+        "SEARCH r USING INDEX sqlite_autoindex_revisions_1 (revision_id=?) LEFT-JOIN"
+      ]
+    }
+  },
+  "oneRunTimingMs": {
+    "cachedPreparedUnfilteredPathLookup400Misses": 193.77,
+    "cachedPreparedManagedIndexedLookup400Misses": 0.141,
+    "fullDestinationMapBuild20000Rows": 14.294,
+    "fullDestinationMap400Misses": 0.052,
+    "fullMapBuildPlusLookups": 14.346
+  },
+  "assertionsPassed": 8,
+  "limitations": [
+    "Synthetic schema reproduces relevant columns and the current managed/linked partial path_identity indexes; it is not a complete library database.",
+    "Measures SQLite lookup and full-map materialization only; excludes filesystem orphan fallback, payload copying, worker startup, and end-to-end import behavior.",
+    "The content-fingerprint lookup has no content_fingerprint index in the inspected source DDL; no content-hash query timing was run.",
+    "Single timing run per strategy; values are a local query-shape comparison, not a product performance guarantee."
+  ]
+}

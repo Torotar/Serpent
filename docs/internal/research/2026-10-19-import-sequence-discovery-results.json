@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "benchmark": "import-sequence-discovery-pure-algorithm",
+  "source": "src/shared/image-sequence.ts (loaded from baseline git ref; only in-memory prototype substitution)",
+  "sourceRef": "589d41aaa334c9b04c4623741ea7cdf45c4dafb3",
+  "nodeVersion": "v24.14.0",
+  "repetitions": 3,
+  "scope": "synthetic in-memory filenames only; excludes readdir, metadata decoding, Worker/IPC, SQLite, and UI",
+  "equivalenceFixtures": {
+    "passed": true,
+    "filenameCount": 33,
+    "selectedLookupCount": 11,
+    "cover": [
+      "multiple independent runs",
+      "numbering gaps",
+      "zero padding",
+      "parentheses",
+      "duplicate frame values",
+      "directory isolation",
+      "unsupported extension"
+    ]
+  },
+  "detectBenchmarks": [
+    {
+      "siblingCount": 1000,
+      "sequenceCount": 1,
+      "frameCount": 1000,
+      "estimatedArrayElementCopiesPerProductionCall": 499500,
+      "productionSpreadAppend": {
+        "medianMs": 1.767,
+        "samplesMs": [
+          2.413,
+          1.767,
+          1.496
+        ]
+      },
+      "pushAppendPrototype": {
+        "medianMs": 1.041,
+        "samplesMs": [
+          1.041,
+          0.798,
+          1.073
+        ]
+      }
+    }
+  ],
+  "repeatedFindBenchmarks": [
+    {
+      "siblingCount": 1000,
+      "selectedCount": 1,
+      "outputsEquivalent": true,
+      "modeledParentDirectoryEnumerationsFromSourceCalls": {
+        "repeatedFind": 1,
+        "oneDetectionIndex": 1
+      },
+      "detectorInputFramesPerSet": {
+        "repeatedFind": 1000,
+        "oneDetectionIndex": 1000
+      },
+      "estimatedArrayElementCopiesPerRepeatedSet": 499500,
+      "repeatedProductionFind": {
+        "medianMs": 1.569,
+        "samplesMs": [
+          1.852,
+          1.569,
+          1.511
+        ]
+      },
+      "oneDetectionPlusIndex": {
+        "medianMs": 0.904,
+        "samplesMs": [
+          1.027,
+          0.904,
+          0.812
+        ]
+      }
+    },
+    {
+      "siblingCount": 1000,
+      "selectedCount": 10,
+      "outputsEquivalent": true,
+      "modeledParentDirectoryEnumerationsFromSourceCalls": {
+        "repeatedFind": 10,
+        "oneDetectionIndex": 1
+      },
+      "detectorInputFramesPerSet": {
+        "repeatedFind": 10000,
+        "oneDetectionIndex": 1000
+      },
+      "estimatedArrayElementCopiesPerRepeatedSet": 4995000,
+      "repeatedProductionFind": {
+        "medianMs": 15.533,
+        "samplesMs": [
+          17.755,
+          15.533,
+          13.585
+        ]
+      },
+      "oneDetectionPlusIndex": {
+        "medianMs": 0.781,
+        "samplesMs": [
+          0.847,
+          0.781,
+          0.743
+        ]
+      }
+    }
+  ]
+}

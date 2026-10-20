@@ -23,6 +23,10 @@
 > 记为“人类验收通过”；该授权不自动延伸到后续会话或未实际操作的条目。
 > 2026-08-01：插件/脚本轨道改走自动化验收（见下表），与上条 Computer Use 人类等价授权无关。
 
+## 导入加速第一阶段验证收尾（暂不进入待验收队列）
+
+`IMP-FAST-001` / `IMP-FAST-002` / `IMP-FAST-003`，工单 `Serpent-8h9qg.1`：2026-10-19 用户授权，2026-10-20 实现与定向验证已落盘。名称/内容/序列整合回归、真实 Electron 冲突/序列及完整退出重启解码、20k 混合媒体 Worker 性能均有通过证据；独立审查两项 P2 已修。`Serpent-hms58` 增加了建库发布有界重试和确定性 EPERM 回归。最新完整资源库可用性 234 项通过 / 1 跳过；最终全仓 `npm test` 可见三项失败后超过 5 分钟无进展，被中断且未输出完整错误堆栈，根因未明。后续主线门禁未执行，故本增量暂不进入待人类验收队列。见[实施方案](../implementation/2026-10-19-import-acceleration-plan.md)、[QA](2026-10-19-import-acceleration.md)和[开发记录](../development/2026-10-19-import-acceleration-development-log.md)。复制哈希融合及事务批处理属于后续阶段，不包含在本次验收范围。
+
 ## 正式语义索引实施中（不进入待验收队列）
 
 `EMBED-INDEX-001` / `Serpent-424d7b`：2026-10-13 用户授权 dev 使用资源库内独立 SQLite 取代 Main JSON 向量缓存，Luna 开发，主 agent 设计监督审查。Worker 语义索引完整退出/重启、过滤与找相似自动化通过；10k 预计算向量 Worker 检索两种维度均小于 500ms，不能代表端到端搜索。资源库可用性通过；完整 `npm test`、E2E 与 20k 性能基线未全绿，独立最终审查、Computer Use、packaged/Windows 和端到端总时长未完成。保持实施中，不改变历史人工验收结论、不登记待人类验收。见[方案](../implementation/2026-10-13-semantic-index-sqlite-plan.md)、[QA](2026-10-13-semantic-sqlite-index.md)与 [ADR-0034](../adr/0034-worker-owned-semantic-index.md)。
