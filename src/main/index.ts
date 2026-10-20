@@ -297,6 +297,7 @@ import {
 } from './automation-execution-journal';
 import { createJsonFileAutomationIdempotencyStore } from './automation-idempotency-store';
 import { EmbeddedMcpServer, EmbeddedMcpServerError } from './embedded-mcp-server';
+import { McpCredentialStoreError } from './mcp-client-credentials';
 import { McpPermissionBroker } from './mcp-permission-broker';
 import { McpPermissionPolicyStore } from './mcp-permission-policy-store';
 import { McpOperationChallengeStore } from './mcp-operation-challenge';
@@ -825,6 +826,7 @@ let appLogPath: string | undefined;
 let appUpdateService: AppUpdateService | undefined;
 let automationExecutionJournal: AutomationExecutionJournal | undefined;
 let embeddedMcpServer: EmbeddedMcpServer | undefined;
+let embeddedMcpInitializationFailure: McpCredentialStoreError | undefined;
 let automationCommandGateway: AutomationCommandGateway | undefined;
 let mcpPermissionPolicyStore: McpPermissionPolicyStore | undefined;
 let mcpOperationChallengeStore: McpOperationChallengeStore | undefined;
@@ -5647,14 +5649,34 @@ async function startApplication(): Promise<void> {
     // credential pepper ACL cannot be restricted on Windows) must disable the
     // MCP service, never the whole app — the settings IPC answers
     // MCP_SETTINGS_UNAVAILABLE while embeddedMcpServer stays undefined.
+    embeddedMcpInitializationFailure = error instanceof McpCredentialStoreError ? error : undefined;
     logger?.error('mcp.embedded-server.construction-failed', error);
   }
   ipcMain.handle(MCP_SETTINGS_REQUEST_CHANNEL, async (event, input: unknown) => {
     const server = embeddedMcpServer;
     const response = (value: unknown) => mcpSettingsResponseSchema.parse(value);
-    if (!server || !mainWindow || event.sender !== mainWindow.webContents) {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
       logger?.info('mcp.settings', 'Rejected MCP settings request.', { code: 'unauthorized_sender' });
-      return response({ ok: false, code: 'MCP_SETTINGS_UNAVAILABLE', message: 'MCP settings are unavailable.', snapshot: server?.snapshot() });
+      return response({ ok: false, code: 'unauthorized_sender', message: 'The MCP settings request sender is not authorized.' });
+    }
+    if (!server) {
+      const failure = embeddedMcpInitializationFailure;
+      logger?.info('mcp.settings', 'MCP service is unavailable after initialization failed.', {
+        code: failure?.code ?? 'MCP_SETTINGS_UNAVAILABLE',
+        ...(failure?.systemCode === undefined ? {} : { systemCode: failure.systemCode }),
+      });
+      return response({
+        ok: false,
+        code: failure?.code ?? 'MCP_SETTINGS_UNAVAILABLE',
+        message: failure?.message ?? 'MCP settings are unavailable.',
+        ...(failure === undefined ? {} : {
+          details: {
+            filePath: failure.filePath,
+            ...(failure.systemCode === undefined ? {} : { systemCode: failure.systemCode }),
+            ...(failure.recoveryCode === undefined ? {} : { recoveryCode: failure.recoveryCode }),
+          },
+        }),
+      });
     }
     const parsed = mcpSettingsRequestSchema.safeParse(input);
     if (!parsed.success) {
