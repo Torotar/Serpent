@@ -148,7 +148,7 @@ single-flight key 包含 libraryGeneration、revisionId、源快照身份和 pro
 | macOS | VideoToolbox 硬件模式 | OpenH264；H.264 候选都失败时记录失败，不换成 VP9 |
 | Linux | 仅对随包可用且实际探测成功的 NVENC/QSV/AMF 候选尝试 | OpenH264；H.264 候选都失败时记录失败，不换成 VP9 |
 
-这是可复现的初始优先顺序，不代表各 GPU 速度排名。候选只在随包 encoder 列表存在时探测。当前 `library-service.ts` 仍将 VP9 列为 fallback；这与用户明确禁止 VP9 的要求冲突，实施时必须删除该回退，并确保没有 H.264 编码器时清楚记录失败。首期不改 FFmpeg 打包依赖或引入 libx264；软件回退沿用现有许可边界。
+这是可复现的初始优先顺序，不代表各 GPU 速度排名。候选只在随包 encoder 列表存在时探测。基线 `7812aced` 的 `library-service.ts` 仍将 VP9 列为 fallback；本次实现已移除该回退，H.264 不可用或实际编码失败时记录失败，不改用 VP9。`video-exr.test.ts` 的无 H.264 与运行时编码失败断言均在定向 Worker 组中通过。首期不改 FFmpeg 打包依赖或引入 libx264；软件回退沿用现有许可边界。
 
 Media Foundation probe 和生产都显式 `-hw_encoding 1`。VideoToolbox 核查随包 encoder 帮助中禁止软件回退的选项并共用；不支持严格硬件模式时不得标记为硬件已确认。所有平台以实际初始化成功和本地诊断为证据，未知则记录未知，不靠名称宣称。
 
@@ -351,13 +351,13 @@ node scripts/run-e2e.mjs tests/e2e/media-preview.test.ts tests/e2e/media-video-p
 
 ### 11.3 四列追溯与人类队列
 
-下表是需求设计映射，不是实现证据；当前实现/测试行号与平台证据均缺失，全部为未实施。每阶段落地后填写真实 `file:line`、当次测试命令/摘要及证据。
+下表按增量维护四列追溯。尚未实施的条目仍是计划映射；MEDIA-FAST-003 仅记录本次内存感知准入的部分实现，不能据此视为整项或整阶段通过。每次落地后填写真实 `file:line`、当次测试命令/摘要及证据。
 
 | 需求条目 | 计划实现位置（实际 file:line 待填） | 计划自动化测试（实际 test:line 待填） | 人工/平台证据 |
 | --- | --- | --- | --- |
 | MEDIA-FAST-001：可解释的等待/处理耗时 | metrics、governor、既有日志 | 阶段计时/采样上限 unit、真实工具基准 | 未执行 |
 | MEDIA-FAST-002：硬件优先与可靠回退 | video-proxy-encoder、service 接线 | encoder unit、video-exr、真实 proxy E2E | Windows/macOS/Linux 设备矩阵未执行 |
-| MEDIA-FAST-003：原子预算下的多进程 | governor、memory-budget、index 分类领取 | 新 governor unit/Worker、跨库 barrier、RSS 基准 | 真实混合负载未执行 |
+| MEDIA-FAST-003：原子预算下的多进程（本次仅内存感知准入增量） | [library-service.ts:7850](../../../src/worker/library-service.ts#L7850)、[media-memory-concurrency.ts:21](../../../src/worker/media-memory-concurrency.ts#L21)、[media-memory-budget.ts:81](../../../src/worker/media-memory-budget.ts#L81) | [media-memory-concurrency.test.ts:10](../../../tests/unit/media-memory-concurrency.test.ts#L10)、[video-exr.test.ts:1632](../../../tests/worker/video-exr.test.ts#L1632)、[video-exr.test.ts:1682](../../../tests/worker/video-exr.test.ts#L1682)；定向 Worker 组 183 项通过，`npm run test:library-availability` 234 项通过、1 项跳过 | 真实混合负载、RSS、Electron E2E、Computer Use 未执行；E2E harness 会重建共享 `.vite`，当前开发实例仍运行；本次 QA 未验收 |
 | MEDIA-FAST-004：探针复用、单帧封面 | video-metadata-probe、poster 接线 | revision/取消 single-flight unit、真实长 GOP 片段 | 导入/滚动/竖屏人眼检查未执行 |
 | MEDIA-FAST-005：转码与浏览共存 | 分类队列、urgent 生命周期 | 冷封面+proxy E2E、跨库、交互轮询 | Computer Use/用户未执行 |
 | MEDIA-FAST-006：磁盘与进程回收 | runner、artifact 发布、退出 owner | ENOSPC、取消、重启 failpoint、进程生命周期 E2E | Windows 占用/关闭/删除未执行 |

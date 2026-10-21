@@ -82,6 +82,10 @@ import {
   workerMediaInteractiveDecodeConcurrency,
 } from './media-concurrency';
 import {
+  mediaFfmpegConcurrencyLimit,
+  systemAvailablePhysicalMemoryBytes,
+} from './media-memory-concurrency';
+import {
   encoderUsesHardwareName,
   ffmpegOneFrameEncodeArgs,
   listedH264ProxyEncoders,
@@ -465,7 +469,7 @@ const AUDIO_WAVEFORM_GENERATOR = `ffmpeg@${FFMPEG_VERSION}+${AUDIO_WAVEFORM_COVE
 const VIDEO_PROXY_SCALE_FILTER =
   'scale=w=min(720\\,iw):h=min(720\\,ih):force_original_aspect_ratio=decrease:force_divisible_by=2';
 type VideoProxyProfile = {
-  codec: 'h264' | 'vp9';
+  codec: 'h264';
   encoder: string;
   extension: 'mp4' | 'webm';
   mimeType: 'video/mp4' | 'video/webm';
@@ -4802,7 +4806,8 @@ class AsyncSemaphore {
 // libraries in the process, not merely within one queue drain.
 // Image decode gets a small hard-capped pool; physical CPU topology may only
 // reduce it on single-core machines, never expand native memory pressure.
-// FFmpeg and OIIO stay at one because their frame buffers are memory-bound.
+// FFmpeg concurrency adapts to current system memory; OIIO remains single-flight
+// because its frame buffers are large.
 const MEDIA_DECODE_CONCURRENCY = workerMediaDecodeConcurrency();
 const MEDIA_INTERACTIVE_DECODE_CONCURRENCY = workerMediaInteractiveDecodeConcurrency();
 // Background image work remains limited to the original two slots. Two extra
@@ -4812,9 +4817,6 @@ const MEDIA_INTERACTIVE_DECODE_CONCURRENCY = workerMediaInteractiveDecodeConcurr
 const sharpNativeDecoderSemaphore = new AsyncSemaphore(MEDIA_INTERACTIVE_DECODE_CONCURRENCY);
 const sharpDecoderSemaphore = new AsyncSemaphore(MEDIA_DECODE_CONCURRENCY);
 const interactiveSharpDecoderSemaphore = new AsyncSemaphore(MEDIA_INTERACTIVE_DECODE_CONCURRENCY);
-// FFmpeg's thumbnail filter can retain decoded frames; one native process at
-// a time is the intentional safety limit even on high-core machines.
-const ffmpegDecoderSemaphore = new AsyncSemaphore(1);
 const oiioDecoderSemaphore = new AsyncSemaphore(1);
 
 /** True when a visible/viewer Sharp job can start without aborting a running background decode. */
@@ -5065,6 +5067,8 @@ export interface LibraryServiceOptions {
   mediaComponentProbe?: (component: MediaAutoRepairComponent) => boolean;
   /** Injectable spawn for binary subprocesses (ffmpeg/ffprobe/oiiotool). */
   spawnFn?: SpawnFunction;
+  /** Test-only system-memory seam for deterministic adaptive FFmpeg concurrency coverage. */
+  availablePhysicalMemoryBytesForTests?: () => number | undefined;
   /**
    * 永久删除一个链接资产的源文件。可注入，用于覆盖权限/占用/磁盘错误等路径。
    * 2026-09-15 起链接资产的删除**不再使用系统回收站**。
@@ -6902,6 +6906,7 @@ function closeIgnoringFailure(connection: DatabaseConnection | undefined): void 
 export class LibraryService {
   /** Stable for this Worker process; a new app process gets a new session. */
   private readonly applicationSessionId = randomUUID();
+  private reportedMemoryProbeUnavailable = false;
   /** App setting: audio grid thumbnails use cover art when the file has one. */
   private audioPreviewPrefersCover = true;
   private readonly openById = new Map<string, OpenLibrary>();
@@ -7857,21 +7862,22 @@ export class LibraryService {
     return mediaNativeMemoryBudget.run(
       spawnOptions.signal,
       memoryBytes,
-      () => ffmpegDecoderSemaphore.run(
-        spawnOptions.signal,
-        async () => {
-          try {
-            const result = await this.spawnFn(command, boundedArgs, spawnOptions);
-            if (mediaResourceFailureFromSpawnResult(result)) {
-              throw asMediaResourceExhaustedError(result, 'ffmpeg')
-                ?? new Error('FFmpeg reported native resource pressure.');
-            }
-            return result;
-          } catch (error) {
-            throw asMediaResourceExhaustedError(error, 'ffmpeg') ?? error;
+      async () => {
+        try {
+          const result = await this.spawnFn(command, boundedArgs, spawnOptions);
+          if (mediaResourceFailureFromSpawnResult(result)) {
+            throw asMediaResourceExhaustedError(result, 'ffmpeg')
+              ?? new Error('FFmpeg reported native resource pressure.');
           }
-        },
-      ),
+          return result;
+        } catch (error) {
+          throw asMediaResourceExhaustedError(error, 'ffmpeg') ?? error;
+        }
+      },
+      {
+        key: 'ffmpeg',
+        limit: () => mediaFfmpegConcurrencyLimit(this.availablePhysicalMemoryBytes()),
+      },
     );
   }
 
@@ -7913,6 +7919,32 @@ export class LibraryService {
     } catch {
       // Diagnostics are strictly best effort and must never replace the primary failure.
     }
+  }
+
+  private availablePhysicalMemoryBytes(): number | undefined {
+    let bytes: number | undefined;
+    try {
+      bytes = this.options.availablePhysicalMemoryBytesForTests
+        ? this.options.availablePhysicalMemoryBytesForTests()
+        : systemAvailablePhysicalMemoryBytes();
+    } catch {
+      bytes = undefined;
+    }
+
+    if (Number.isSafeInteger(bytes) && bytes! > 0) {
+      this.reportedMemoryProbeUnavailable = false;
+      return bytes;
+    }
+
+    if (!this.reportedMemoryProbeUnavailable) {
+      this.reportedMemoryProbeUnavailable = true;
+      this.diagnose(
+        'media-memory.probe-unavailable',
+        new Error('System physical memory is unavailable; FFmpeg concurrency uses the conservative limit.'),
+        { fallback: 'conservative', maxConcurrentFfmpeg: mediaFfmpegConcurrencyLimit(undefined) },
+      );
+    }
+    return undefined;
   }
 
   reportDiagnostic(scope: string, error: unknown, context?: Record<string, unknown>): void {
@@ -28599,31 +28631,10 @@ export class LibraryService {
     };
   }
 
-  private vp9VideoProxyProfile(): VideoProxyProfile {
-    return {
-      codec: 'vp9',
-      encoder: 'libvpx-vp9',
-      extension: 'webm',
-      mimeType: 'video/webm',
-      args: [
-        '-c:v', 'libvpx-vp9',
-        '-threads', '1',
-        '-b:v', '1M',
-        '-deadline', 'realtime',
-        '-cpu-used', '8',
-        '-row-mt', '1',
-        '-g', '60',
-        '-c:a', 'libopus',
-        '-b:a', '128k',
-      ],
-    };
-  }
-
   /**
    * Listing an encoder in `ffmpeg -encoders` is not a capability proof.
-   * Probe a 1-frame lavfi encode and keep the first encoder that writes a
-   * non-empty file. Hardware names that fail fall through to the next listed
-   * candidate, then to VP9.
+   * Probe a 1-frame lavfi encode and keep the first H.264 encoder that writes
+   * a non-empty file. If none works, proxy generation fails without trying VP9.
    */
   private async probeVideoProxyEncoder(
     ffmpegPath: string,
@@ -28692,12 +28703,10 @@ export class LibraryService {
       this.videoProxyEncoderByFfmpegPath.set(ffmpegPath, encoder);
     }
 
-    return encoder === null
-      ? [this.vp9VideoProxyProfile()]
-      : [this.h264VideoProxyProfile(encoder), this.vp9VideoProxyProfile()];
+    return encoder === null ? [] : [this.h264VideoProxyProfile(encoder)];
   }
 
-  /** Generate an H.264/MP4 proxy, with fast VP9/WebM fallback. */
+  /** Generate an H.264/MP4 proxy; VP9 is deliberately never used. */
   private async generateVideoProxy(
     input: { libraryId: string; assetId: string },
     openLibrary: OpenLibrary,
@@ -28709,8 +28718,8 @@ export class LibraryService {
   ): Promise<string> {
     const artifactId = randomUUID();
     const profiles = await this.resolveVideoProxyProfiles(ffmpegPath, execution);
-    let lastError: unknown = new Error('No video proxy encoder is available.');
-    let failedProfile = profiles[0] ?? this.vp9VideoProxyProfile();
+    let lastError: unknown = new Error('No H.264 video proxy encoder is available.');
+    let failedProfile = profiles[0] ?? this.h264VideoProxyProfile('unavailable');
 
     for (const profile of profiles) {
       failedProfile = profile;
