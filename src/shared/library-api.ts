@@ -678,6 +678,15 @@ export interface SerpentLibraryApi {
   onProgress(listener: (event: ExportProgressEvent | ImportProgressEvent | SyncProgressEvent | DeleteProgressEvent) => void): () => void;
   // AI
   getAiConfig(): Promise<LibraryApiResult<{
+    activeProfileId: string | null;
+    profiles: Array<{
+      id: string;
+      name: string;
+      apiFormat: AiApiFormat;
+      model: string;
+      baseUrl: string;
+      hasCredential: boolean;
+    }>;
     apiFormat: AiApiFormat | null;
     model: string | null;
     baseUrl: string;
@@ -700,11 +709,18 @@ export interface SerpentLibraryApi {
     autoAnalyzeEnabled: boolean;
     disclaimerAccepted: boolean;
   }>>;
-  setAiConfig(input: {
+  saveAiProfile(input: {
+    id?: string;
+    name: string;
     apiFormat: AiApiFormat;
     model: string;
-    baseUrl?: string;
+    baseUrl: string;
     apiKey?: string;
+    clearCredential?: boolean;
+  }): Promise<LibraryApiResult<{ id: string }>>;
+  activateAiProfile(input: { id: string }): Promise<LibraryApiResult<{ id: string }>>;
+  deleteAiProfile(input: { id: string }): Promise<LibraryApiResult<{ id: string }>>;
+  setAiConfig(input: {
     enabledFields?: { description: boolean; tags: boolean; rating: boolean };
     analysisSettings?: {
       forceExistingTags: boolean;
@@ -951,11 +967,13 @@ export interface SerpentLibraryApi {
     model: string;
     apiKey?: string;
     baseUrl?: string;
+    profileId?: string;
   }): Promise<LibraryApiResult<{ success: boolean; errorKind?: string; reason?: string }>>;
   listAiModels(input: {
     apiFormat: AiApiFormat;
     apiKey?: string;
     baseUrl?: string;
+    profileId?: string;
   }): Promise<LibraryApiResult<{ models: string[]; errorKind?: string; reason?: string }>>;
   clearAiContent(input: { libraryId: string; scope: { kind: 'asset' | 'selection' | 'folder' | 'library'; assetIds?: string[]; folderId?: string }; confirm: boolean; fields?: Array<'description' | 'rating' | 'tags'> }): Promise<LibraryApiResult<{ clearedCount: number }>>;
   pauseAiJobs(input: { libraryId: string; jobIds?: string[] }): Promise<LibraryApiResult<{ pausedCount: number }>>;
