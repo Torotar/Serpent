@@ -13,6 +13,7 @@ import {
 import { createPortal, flushSync } from "react-dom";
 
 import { Icon, type IconName } from "./Icons";
+import { isCurrentAiConnectionProbe } from "./ai-connection-probe-guard";
 import { iconActionAttrs } from "./icon-action-attrs";
 import { EditTextContextMenuHost } from "./edit-text-context-menu";
 import { HoverTipHost } from "./hover-tip";
@@ -2170,7 +2171,25 @@ function AppInner() {
   const [aiModel, setAiModel] = useState(DEFAULT_AI_MODELS[DEFAULT_AI_API_FORMAT]);
   const [aiBaseUrl, setAiBaseUrl] = useState("");
   const [aiApiKey, setAiApiKey] = useState("");
+  const [aiDraftHasKey, setAiDraftHasKey] = useState(false);
   const [aiHasKey, setAiHasKey] = useState(false);
+  const [aiProfiles, setAiProfiles] = useState<Array<{
+    id: string;
+    name: string;
+    apiFormat: AiApiFormat;
+    model: string;
+    baseUrl: string;
+    hasCredential: boolean;
+  }>>([]);
+  const [aiActiveProfileId, setAiActiveProfileId] = useState<string | null>(null);
+  const aiActiveProfileIdRef = useRef<string | null>(null);
+  const aiConnectionProbeGenerationRef = useRef(0);
+  const updateAiActiveProfileId = useCallback((profileId: string | null) => {
+    aiActiveProfileIdRef.current = profileId;
+    setAiActiveProfileId(profileId);
+  }, []);
+  const [aiProfileDraftId, setAiProfileDraftId] = useState<string | null>(null);
+  const [aiProfileName, setAiProfileName] = useState("");
   const [aiDescriptionEnabled, setAiDescriptionEnabled] = useState(true);
   const [aiTagsEnabled, setAiTagsEnabled] = useState(true);
   const [aiRatingEnabled, setAiRatingEnabled] = useState(true);
@@ -2188,9 +2207,9 @@ function AppInner() {
   const [aiDisclaimerAccepted, setAiDisclaimerAccepted] = useState(false);
   const [aiConnectionState, setAiConnectionState] =
     useState<AiConnectionState>("idle");
-  const [aiConnectionReason, setAiConnectionReason] = useState<
-    string | undefined
-  >(undefined);
+  const [aiDraftConnectionState, setAiDraftConnectionState] =
+    useState<AiConnectionState>("idle");
+  const [aiDraftConnectionReason, setAiDraftConnectionReason] = useState<string | undefined>(undefined);
   const [aiSaveVerifying, setAiSaveVerifying] = useState(false);
   const aiAutoConnectAttemptedRef = useRef(false);
   /** Fingerprint of credentials last proven by a successful probe. */
@@ -12392,67 +12411,94 @@ function AppInner() {
 
   async function loadAiConfig() {
     if (!api) return;
-    const result = await api.getAiConfig();
-    if (!result.ok) return;
-    setAiApiFormat(
-      (result.value.apiFormat as AiApiFormat) ?? DEFAULT_AI_API_FORMAT,
-    );
-    setAiModel(result.value.model ?? DEFAULT_AI_MODELS[DEFAULT_AI_API_FORMAT]);
-    setAiBaseUrl(result.value.baseUrl ?? "");
-    setAiHasKey(result.value.hasKey);
-    setAiDescriptionEnabled(result.value.enabledFields.description);
-    setAiTagsEnabled(result.value.enabledFields.tags);
-    setAiRatingEnabled(result.value.enabledFields.rating);
-    setAiForceExistingTags(result.value.analysisSettings.forceExistingTags);
-    setAiAnalysisSettings(
-      toWireAiAnalysisSettings(
-        normalizeAiAnalysisSettings(result.value.analysisSettings),
-      ),
-    );
-    const langs = result.value.languages as
-      | Array<"zh-CN" | "en" | "ja" | "ko">
-      | undefined;
-    setAiLanguages(langs?.length ? [langs[0]!] : ["zh-CN"]);
-    setAiConcurrencyLimit(result.value.concurrencyLimit);
-    setAiMaxAnalysisImageEdgePx(result.value.maxAnalysisImageEdgePx);
-    setAiAutoAnalyzeEnabled(result.value.autoAnalyzeEnabled);
-    setAiDisclaimerAccepted(result.value.disclaimerAccepted);
-    aiVerifiedFingerprintRef.current = null;
+    try {
+      const result = await api.getAiConfig();
+      if (!result.ok) {
+        setError(toMessage(result.error, t("toast.aiConfigLoadFailed"), locale));
+        return;
+      }
+      setAiProfiles(result.value.profiles);
+      updateAiActiveProfileId(result.value.activeProfileId);
+      setAiProfileDraftId(result.value.activeProfileId);
+      setAiProfileName(
+        result.value.profiles.find((profile) => profile.id === result.value.activeProfileId)?.name ?? "",
+      );
+      setAiApiFormat(
+        (result.value.apiFormat as AiApiFormat) ?? DEFAULT_AI_API_FORMAT,
+      );
+      setAiModel(result.value.model ?? DEFAULT_AI_MODELS[DEFAULT_AI_API_FORMAT]);
+      setAiBaseUrl(result.value.baseUrl ?? "");
+      setAiHasKey(result.value.hasKey);
+      setAiDraftHasKey(result.value.hasKey);
+      setAiDraftConnectionState(result.value.hasKey ? "idle" : "disconnected");
+      setAiDraftConnectionReason(undefined);
+      setAiDescriptionEnabled(result.value.enabledFields.description);
+      setAiTagsEnabled(result.value.enabledFields.tags);
+      setAiRatingEnabled(result.value.enabledFields.rating);
+      setAiForceExistingTags(result.value.analysisSettings.forceExistingTags);
+      setAiAnalysisSettings(
+        toWireAiAnalysisSettings(
+          normalizeAiAnalysisSettings(result.value.analysisSettings),
+        ),
+      );
+      const langs = result.value.languages as
+        | Array<"zh-CN" | "en" | "ja" | "ko">
+        | undefined;
+      setAiLanguages(langs?.length ? [langs[0]!] : ["zh-CN"]);
+      setAiConcurrencyLimit(result.value.concurrencyLimit);
+      setAiMaxAnalysisImageEdgePx(result.value.maxAnalysisImageEdgePx);
+      setAiAutoAnalyzeEnabled(result.value.autoAnalyzeEnabled);
+      setAiDisclaimerAccepted(result.value.disclaimerAccepted);
+      aiVerifiedFingerprintRef.current = null;
+    } catch (caught) {
+      setError(toMessage(caught, t("toast.aiConfigLoadFailed"), locale));
+    }
   }
 
-  function aiCredentialFingerprint(): string {
-    return [
-      aiApiFormat,
-      aiModel.trim(),
-      aiBaseUrl.trim(),
-      aiApiKey.trim() || (aiHasKey ? "__stored__" : ""),
-    ].join("\u0001");
-  }
+  const matchingDraftAiProfileId = useCallback((): string | undefined => {
+    const profile = aiProfiles.find((item) => item.id === aiProfileDraftId);
+    return profile?.hasCredential ? profile.id : undefined;
+  }, [aiProfileDraftId, aiProfiles]);
 
   const testAiConnectionFromDialog = useCallback(async (): Promise<{
     success: boolean;
     reason?: string;
   }> => {
+    const selectedProfile = aiProfiles.find((profile) => profile.id === aiProfileDraftId);
+    const testsActiveStoredProfile = !aiApiKey.trim()
+      && aiProfileDraftId !== null
+      && aiProfileDraftId === aiActiveProfileId
+      && selectedProfile?.hasCredential === true
+      && selectedProfile.apiFormat === aiApiFormat
+      && selectedProfile.model === aiModel.trim()
+      && selectedProfile.baseUrl === aiBaseUrl.trim();
     if (!api) return { success: false, reason: t("aiConfig.testFailed") };
-    if (!aiApiKey.trim() && !aiHasKey) {
-      setAiConnectionState("disconnected");
-      setAiConnectionReason(t("aiConfig.testFailed"));
+    if (!aiApiKey.trim() && !aiDraftHasKey) {
+      setAiDraftConnectionState("disconnected");
+      setAiDraftConnectionReason(t("aiConfig.testFailed"));
       aiVerifiedFingerprintRef.current = null;
       return { success: false, reason: t("aiConfig.testFailed") };
     }
-    setAiConnectionState("connecting");
-    setAiConnectionReason(undefined);
+    setAiDraftConnectionState("connecting");
+    setAiDraftConnectionReason(undefined);
+    if (testsActiveStoredProfile) {
+      setAiConnectionState("connecting");
+    }
+    const storedProfileId = aiApiKey.trim()
+      ? undefined
+      : matchingDraftAiProfileId();
     const fingerprint = [
       aiApiFormat,
       aiModel.trim(),
       aiBaseUrl.trim(),
-      aiApiKey.trim() || (aiHasKey ? "__stored__" : ""),
+      aiApiKey.trim() || (aiDraftHasKey ? "__stored__" : ""),
     ].join("\u0001");
     const result = await api.testAiConnection({
       apiFormat: aiApiFormat,
       model: aiModel.trim(),
       ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
       baseUrl: aiBaseUrl.trim() || undefined,
+      ...(storedProfileId ? { profileId: storedProfileId } : {}),
     });
     if (!result.ok) {
       const reason = toMessage(
@@ -12460,18 +12506,25 @@ function AppInner() {
         t("aiConfig.testFailed"),
         locale,
       );
-      setAiConnectionState("error");
-      setAiConnectionReason(reason);
+      setAiDraftConnectionState("error");
+      setAiDraftConnectionReason(reason);
+      if (testsActiveStoredProfile) {
+        setAiConnectionState("error");
+      }
       aiVerifiedFingerprintRef.current = null;
       return { success: false, reason };
     }
     if (result.value.success) {
-      setAiConnectionState("connected");
-      setAiConnectionReason(undefined);
+      setAiDraftConnectionState("connected");
+      setAiDraftConnectionReason(undefined);
+      if (testsActiveStoredProfile) {
+        setAiConnectionState("connected");
+      }
       aiVerifiedFingerprintRef.current = fingerprint;
       // Typed key is not on disk until save — only mark ready when stored.
-      if (aiHasKey || !aiApiKey.trim()) {
-        setAiHasKey(true);
+      if (aiDraftHasKey || !aiApiKey.trim()) {
+        setAiDraftHasKey(true);
+        if (aiProfileDraftId === aiActiveProfileId) setAiHasKey(true);
       } else {
         // Probe OK with unsaved key: refresh from disk (still false until save).
         void api.getAiConfig().then((cfg) => {
@@ -12481,16 +12534,23 @@ function AppInner() {
       return { success: true };
     }
     const reason = result.value.reason ?? t("aiConfig.testFailed");
-    setAiConnectionState("error");
-    setAiConnectionReason(reason);
+    setAiDraftConnectionState("error");
+    setAiDraftConnectionReason(reason);
+    if (testsActiveStoredProfile) {
+      setAiConnectionState("error");
+    }
     aiVerifiedFingerprintRef.current = null;
     return { success: false, reason };
   }, [
     aiApiFormat,
     aiApiKey,
-    aiBaseUrl,
-    aiHasKey,
+    aiActiveProfileId,
     aiModel,
+    aiBaseUrl,
+    aiDraftHasKey,
+    aiProfiles,
+    aiProfileDraftId,
+    matchingDraftAiProfileId,
     api,
     locale,
     t,
@@ -12517,17 +12577,7 @@ function AppInner() {
     } = options;
     if (!api) return false;
     const draft = aiConfigPersistDraftRef.current;
-    if (!draft.apiKey.trim() && !draft.hasKey) {
-      if (showNotice) {
-        setError(t("toast.aiConfigSaveFailed"));
-      }
-      return false;
-    }
     const result = await api.setAiConfig({
-      apiFormat: draft.apiFormat,
-      model: draft.model,
-      baseUrl: draft.baseUrl.trim(),
-      ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
       enabledFields: {
         description: draft.descriptionEnabled,
         tags: draft.tagsEnabled,
@@ -12550,16 +12600,12 @@ function AppInner() {
       }
       return false;
     }
-    setAiHasKey(true);
     if (clearApiKeyDraft) setAiApiKey("");
     if (showNotice) setNotice(t("toast.aiConfigSaved"));
     if (verifyConnection) {
       setAiSaveVerifying(true);
       try {
-        const connection = await testAiConnectionFromDialog();
-        if (connection.success) {
-          setAiConnectionReason(undefined);
-        }
+        await testAiConnectionFromDialog();
       } finally {
         setAiSaveVerifying(false);
       }
@@ -12589,22 +12635,125 @@ function AppInner() {
   }
 
   async function saveAiConfig() {
-    if (!api || (!aiApiKey.trim() && !aiHasKey)) return;
-    const alreadyVerified =
-      aiVerifiedFingerprintRef.current === aiCredentialFingerprint() &&
-      aiConnectionState === "connected";
-    const ok = await persistAiConfig(
-      {},
-      {
-        showNotice: true,
-        clearApiKeyDraft: true,
-        verifyConnection: !alreadyVerified,
-      },
-    );
-    if (!ok) return;
-    if (alreadyVerified) {
-      setAiConnectionReason(undefined);
-      setAiSaveVerifying(false);
+    if (!api || !aiModel.trim()) return;
+    const apiKey = aiApiKey.trim();
+    const profileName = aiProfileName.trim() || t("aiConfig.newProfileName");
+    const savedProfile = await api.saveAiProfile({
+      ...(aiProfileDraftId ? { id: aiProfileDraftId } : {}),
+      name: profileName,
+      apiFormat: aiApiFormat,
+      model: aiModel.trim(),
+      baseUrl: aiBaseUrl.trim(),
+      ...(apiKey ? { apiKey } : {}),
+    });
+    if (!savedProfile.ok) {
+      setError(toMessage(savedProfile.error, t("toast.aiConfigSaveFailed"), locale));
+      return;
+    }
+    setAiProfileDraftId(savedProfile.value.id);
+    setAiProfileName(profileName);
+    setAiApiKey("");
+    setAiDraftHasKey(aiDraftHasKey || Boolean(apiKey));
+    if (savedProfile.value.id === aiActiveProfileId) {
+      setAiHasKey(aiDraftHasKey || Boolean(apiKey));
+    }
+    setAiDraftConnectionState("idle");
+    setAiDraftConnectionReason(undefined);
+    aiVerifiedFingerprintRef.current = null;
+    setNotice(t("toast.aiConfigSaved"));
+    if (savedProfile.value.id === aiActiveProfileId) {
+      setAiConnectionState("idle");
+      aiAutoConnectAttemptedRef.current = false;
+    }
+
+    const refreshed = await api.getAiConfig();
+    if (refreshed.ok) {
+      setAiProfiles(refreshed.value.profiles);
+      updateAiActiveProfileId(refreshed.value.activeProfileId);
+      setAiHasKey(refreshed.value.hasKey);
+      const saved = refreshed.value.profiles.find((profile) => profile.id === savedProfile.value.id);
+      if (saved) setAiDraftHasKey(saved.hasCredential);
+    }
+  }
+
+  function beginNewAiProfile() {
+    setAiProfileDraftId(null);
+    setAiProfileName(t("aiConfig.newProfileName"));
+    setAiApiKey("");
+    setAiDraftHasKey(false);
+    setAiDraftConnectionState("disconnected");
+    setAiDraftConnectionReason(undefined);
+    aiVerifiedFingerprintRef.current = null;
+  }
+
+  function selectAiProfile(id: string) {
+    if (!id) {
+      beginNewAiProfile();
+      return;
+    }
+    const profile = aiProfiles.find((item) => item.id === id);
+    if (!profile) return;
+    setAiProfileDraftId(profile.id);
+    setAiProfileName(profile.name);
+    setAiApiFormat(profile.apiFormat);
+    setAiModel(profile.model);
+    setAiBaseUrl(profile.baseUrl);
+    setAiApiKey("");
+    setAiDraftHasKey(profile.hasCredential);
+    setAiDraftConnectionState("idle");
+    setAiDraftConnectionReason(undefined);
+    aiVerifiedFingerprintRef.current = null;
+  }
+
+  async function activateAiProfile(id: string) {
+    if (!api) return;
+    const result = await api.activateAiProfile({ id });
+    if (!result.ok) {
+      setError(toMessage(result.error, t("toast.aiConfigSaveFailed"), locale));
+      return;
+    }
+    setAiApiKey("");
+    setAiConnectionState("idle");
+    aiAutoConnectAttemptedRef.current = false;
+    await loadAiConfig();
+  }
+
+  async function removeAiProfile(id: string) {
+    if (!api) return;
+    if (!(await requestConfirmation(t("aiConfig.deleteProfileConfirm"), true))) return;
+    const result = await api.deleteAiProfile({ id });
+    if (!result.ok) {
+      setError(toMessage(result.error, t("toast.aiConfigSaveFailed"), locale));
+      return;
+    }
+    setAiApiKey("");
+    await loadAiConfig();
+  }
+
+  async function clearAiProfileCredential() {
+    if (!api || !aiProfileDraftId) return;
+    if (!(await requestConfirmation(t("aiConfig.clearApiKeyConfirm"), true))) return;
+    const result = await api.saveAiProfile({
+      id: aiProfileDraftId,
+      name: aiProfileName.trim(),
+      apiFormat: aiApiFormat,
+      model: aiModel.trim(),
+      baseUrl: aiBaseUrl.trim(),
+      clearCredential: true,
+    });
+    if (!result.ok) {
+      setError(toMessage(result.error, t("toast.aiConfigSaveFailed"), locale));
+      return;
+    }
+    setAiApiKey("");
+    setAiDraftHasKey(false);
+    setAiDraftConnectionState("disconnected");
+    setAiDraftConnectionReason(undefined);
+    const refreshed = await api.getAiConfig();
+    if (refreshed.ok) {
+      setAiProfiles(refreshed.value.profiles);
+      updateAiActiveProfileId(refreshed.value.activeProfileId);
+      setAiHasKey(refreshed.value.hasKey);
     }
   }
 
@@ -12615,13 +12764,16 @@ function AppInner() {
       aiAutoConnectAttemptedRef.current = false;
       return;
     }
-    if (!aiHasKey || aiAutoConnectAttemptedRef.current) return;
+    if (!aiHasKey || aiAutoConnectAttemptedRef.current
+      || aiProfileDraftId !== aiActiveProfileId) return;
     aiAutoConnectAttemptedRef.current = true;
     void testAiConnectionFromDialog();
   }, [
     appSettingsOpen,
     appSettingsCategory,
     aiHasKey,
+    aiActiveProfileId,
+    aiProfileDraftId,
     testAiConnectionFromDialog,
   ]);
 
@@ -12641,10 +12793,17 @@ function AppInner() {
   }, [librarySettingsOpen, api, library]);
 
   const probeStoredAiConnection = useCallback(async () => {
+    const generation = ++aiConnectionProbeGenerationRef.current;
+    const capturedProfileId = aiActiveProfileId;
+    const isCurrentProbe = () => isCurrentAiConnectionProbe({
+      capturedGeneration: generation,
+      latestGeneration: aiConnectionProbeGenerationRef.current,
+      capturedProfileId,
+      activeProfileId: aiActiveProfileIdRef.current,
+    });
     if (!api) return;
     if (!shouldRunAiConnectionHeartbeat(aiHasKey)) {
       setAiConnectionState("disconnected");
-      setAiConnectionReason(undefined);
       aiVerifiedFingerprintRef.current = null;
       return;
     }
@@ -12652,28 +12811,27 @@ function AppInner() {
       prev === "connected" || prev === "connecting" ? prev : "connecting",
     );
     const cfg = await api.getAiConfig();
+    if (!isCurrentProbe()) return;
     if (!cfg.ok || !cfg.value.hasKey || !cfg.value.apiFormat || !cfg.value.model) {
       setAiConnectionState("disconnected");
-      setAiConnectionReason(t("aiConfig.testFailed"));
       aiVerifiedFingerprintRef.current = null;
       return;
     }
+    if (cfg.value.activeProfileId !== capturedProfileId) return;
     const result = await api.testAiConnection({
       apiFormat: cfg.value.apiFormat,
       model: cfg.value.model,
       baseUrl: cfg.value.baseUrl.trim() || undefined,
+      ...(capturedProfileId ? { profileId: capturedProfileId } : {}),
     });
+    if (!isCurrentProbe()) return;
     if (!result.ok) {
       setAiConnectionState("error");
-      setAiConnectionReason(
-        toMessage(result.error, t("aiConfig.testFailed"), locale),
-      );
       aiVerifiedFingerprintRef.current = null;
       return;
     }
     if (result.value.success) {
       setAiConnectionState("connected");
-      setAiConnectionReason(undefined);
       aiVerifiedFingerprintRef.current = [
         cfg.value.apiFormat,
         cfg.value.model.trim(),
@@ -12683,9 +12841,8 @@ function AppInner() {
       return;
     }
     setAiConnectionState("error");
-    setAiConnectionReason(result.value.reason ?? t("aiConfig.testFailed"));
     aiVerifiedFingerprintRef.current = null;
-  }, [api, aiHasKey, locale, t]);
+  }, [api, aiActiveProfileId, aiHasKey]);
 
   useEffect(() => {
     if (!shouldRunAiConnectionHeartbeat(aiHasKey)) {
@@ -12712,10 +12869,17 @@ function AppInner() {
     reason?: string;
   }> {
     if (!api) return { models: [], reason: t("aiConfig.fetchModelsFailed") };
+    if (!aiApiKey.trim() && !aiDraftHasKey) {
+      return { models: [], reason: t("aiConfig.fetchModelsFailed") };
+    }
+    const storedProfileId = aiApiKey.trim()
+      ? undefined
+      : matchingDraftAiProfileId();
     const result = await api.listAiModels({
       apiFormat: aiApiFormat,
       ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
       baseUrl: aiBaseUrl.trim() || undefined,
+      ...(storedProfileId ? { profileId: storedProfileId } : {}),
     });
     if (!result.ok) {
       return {
@@ -15877,13 +16041,17 @@ function AppInner() {
             open={appSettingsOpen && appSettingsCategory === "ai"}
             variant="embedded"
             apiKey={aiApiKey}
+            profiles={aiProfiles}
+            activeProfileId={aiActiveProfileId}
+            profileDraftId={aiProfileDraftId}
+            profileName={aiProfileName}
             apiFormat={aiApiFormat}
             model={aiModel}
             baseUrl={aiBaseUrl}
             languages={aiLanguages}
             concurrencyLimit={aiConcurrencyLimit}
             maxAnalysisImageEdgePx={aiMaxAnalysisImageEdgePx}
-            hasKey={aiHasKey}
+            hasKey={aiDraftHasKey}
             descriptionEnabled={aiDescriptionEnabled}
             tagsEnabled={aiTagsEnabled}
             ratingEnabled={aiRatingEnabled}
@@ -15891,9 +16059,15 @@ function AppInner() {
             analysisSettings={aiAnalysisSettings}
             disclaimerAccepted={aiDisclaimerAccepted}
             autoAnalyzeEnabled={aiAutoAnalyzeEnabled}
-            connectionState={aiConnectionState}
-            connectionReason={aiConnectionReason}
+            connectionState={aiDraftConnectionState}
+            connectionReason={aiDraftConnectionReason}
             onApiKeyChange={setAiApiKey}
+            onProfileNameChange={setAiProfileName}
+            onNewProfile={beginNewAiProfile}
+            onSelectProfile={selectAiProfile}
+            onActivateProfile={(id) => void activateAiProfile(id)}
+            onDeleteProfile={(id) => void removeAiProfile(id)}
+            onClearCredential={() => void clearAiProfileCredential()}
             onApiFormatChange={setAiApiFormat}
             onModelChange={setAiModel}
             onBaseUrlChange={setAiBaseUrl}

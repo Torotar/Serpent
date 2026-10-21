@@ -234,9 +234,14 @@ test('imports into the library root after leaving a folder scope', async () => {
     await window.getByRole('textbox', { name: '名称' }).fill(libraryName);
     await window.getByRole('button', { name: '创建', exact: true }).click();
     await window.getByRole('button', { name: '添加文件夹' }).click();
-    await window.getByLabel('新文件夹名称').fill('项目');
-    await window.keyboard.press('Enter');
-    await expect(sidebarFolderRow(window, '项目')).toBeVisible();
+    const folderNameInput = window.locator('.nav-inline-edit input');
+    await expect(folderNameInput).toBeVisible({ timeout: 5_000 });
+    await folderNameInput.fill('项目');
+    await folderNameInput.press('Enter');
+    await expect(window.locator('.nav-inline-edit')).toHaveCount(0, {
+      timeout: 10_000,
+    });
+    await expect(sidebarFolderRow(window, '项目')).toBeVisible({ timeout: 10_000 });
     await sidebarFolderRow(window, '项目').click();
     await window.getByRole('button', { name: '所有资产' }).click();
     await window.getByRole('button', { name: '导入文件', exact: true }).first().click();

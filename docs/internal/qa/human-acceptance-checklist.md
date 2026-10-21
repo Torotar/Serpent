@@ -31,6 +31,12 @@
 
 `EMBED-INDEX-001` / `Serpent-424d7b`：2026-10-13 用户授权 dev 使用资源库内独立 SQLite 取代 Main JSON 向量缓存，Luna 开发，主 agent 设计监督审查。Worker 语义索引完整退出/重启、过滤与找相似自动化通过；10k 预计算向量 Worker 检索两种维度均小于 500ms，不能代表端到端搜索。资源库可用性通过；完整 `npm test`、E2E 与 20k 性能基线未全绿，独立最终审查、Computer Use、packaged/Windows 和端到端总时长未完成。保持实施中，不改变历史人工验收结论、不登记待人类验收。见[方案](../implementation/2026-10-13-semantic-index-sqlite-plan.md)、[QA](2026-10-13-semantic-sqlite-index.md)与 [ADR-0034](../adr/0034-worker-owned-semantic-index.md)。
 
+## 2026-10-21 AI 分析多 API 档案
+
+| ID | 功能 | 状态 | 人类操作 | 预期结果 | 证据 | 结果/反馈 |
+| --- | --- | --- | --- | --- | --- | --- |
+| AI-PROFILES-001 / `Serpent-906fed` | 管理多份 AI API 配置并切换当前档案；分析策略保持全局 | 待人类验收 | ① 打开「设置 → AI分析」，新建两份名称、地址和模型不同的配置。保存第二份时先不填 Key，确认草稿可保存但不能激活或发请求；填入 Key 后测试连接、获取模型并显式设为当前。② 在资产上触发 AI 分析，确认请求使用当前配置；切换另一配置后再分析，确认后续请求使用新配置。若使用可控的慢响应服务，再在请求期间切档，确认已发出的请求不变。③ 开启自动分析并接受说明，导入测试资产，确认自动任务使用当前配置；使用 AI 语义搜索规划时也确认请求落到当前档案。④ 修改「强制使用已有标签」和至少一项其他分析策略，切换档案并关闭/重新打开设置，确认这些偏好不随档案切换。⑤ 完全退出应用后重新启动，检查当前档案仍选中且可用「测试连接」验证保存凭据；确认界面不会回显 Key。⑥ 删除当前档案并确认，检查活动选择变为空；确认其他档案仍在且分析偏好不变。 | 两份配置可独立保存、测试并往返切换；不完整草稿不会取代当前项；资产与自动分析、搜索规划使用当前档案；保存 Key 不回显；选择和凭据在完整重启后恢复；分析策略独立保留；删除当前档案会清空活动选择，不会静默改用其他 Key。 | [方案](../implementation/2026-10-21-ai-analysis-api-profiles-plan.md) / [开发日志](../development/2026-10-21-ai-analysis-api-profiles-development-log.md) / [QA](2026-10-21-ai-analysis-api-profiles-qa.md) / `src/main/ai-profile-store.ts` / `src/renderer/AiConfigDialog.tsx` / [档案切换 E2E](../../../tests/e2e/ai-profile-switching.test.ts) / [存储单测](../../../tests/unit/ai-profile-store.test.ts) / [搜索规划路由单测](../../../tests/unit/main-ai-owned-request.test.ts) | 档案切换、单项/批量分析及搜索规划定向自动化通过；自动分析导入路径无直接 E2E。真实设置页 Computer Use、真实服务、Windows/packaged 未验证；完整 `verify:mainline` 被两个无关 Worker 测试失败阻断。等待用户操作与反馈。 |
+
 ## API 格式实现的验证阻断（不进入待验收队列）
 
 `EMBED-API-001`：2026-10-12 仅调整 Embedding API 格式。三个短名、一行中英文介绍、显式 llama.cpp 图片格式及严格响应映射已实现；5 文件/152 条定向测试、9 文件/231 条资源库可用性测试通过。后台隔离 Electron 在启动连接阶段两次超时，未执行 UI 与重启断言；Computer Use 只获取空白内容区，亮暗主题和交互未验证。已有类型检查和 preload ESLint 阻断另见 [开发记录](../development/2026-10-12-embedding-api-formats.md)。尚不满足「待人类验收」条件；`EMBED-SEARCH-001` 状态与原始排序决定不变。

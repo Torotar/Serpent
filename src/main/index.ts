@@ -8,9 +8,11 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
+  type Dirent,
 } from "node:fs";
 
 import {
@@ -84,6 +86,34 @@ import {
   type SyncBindingRecord,
 } from "./library-request/sync";
 import { tryHandleAiOwnedRequest } from "./library-request/ai";
+import {
+  recoverAiProfileTransaction as recoverAiProfileTransactionFromJournal,
+  commitAiProfileTransaction as commitAiProfileTransactionToJournal,
+  type AiProfileCredentialMutation,
+  type AiProfileTransactionIo,
+} from "./ai-profile-transaction";
+import {
+  runAiProfileMigrationStartup,
+} from "./ai-profile-legacy-config";
+import {
+  activateAiProfile,
+  AiProfileStorageError,
+  captureAiConnectionSnapshot,
+  createAiProfileId,
+  deleteAiProfile,
+  emptyAiProfileCatalog,
+  AiProfileValidationError,
+  isAiProfileId,
+  legacyAiConnectionProfile,
+  migrateAiProfileStorage,
+  parseAiProfileCatalog,
+  resolveAiCredential,
+  saveAiConnectionProfile as saveAiProfileInCatalog,
+  summarizeAiProfiles,
+  type AiConnectionProfileDraft,
+  type AiProfileCatalog,
+} from "./ai-profile-store";
+import { readAtomicJsonFile, writeAtomicJsonFile } from "./atomic-json-file";
 import { tryHandleEmbeddingModelRequest } from "./library-request/embedding-models";
 import { EmbeddingTestIndex } from "./embedding-test-index";
 import { EmbeddingHttpIndex } from "./embedding-http-index";
@@ -445,32 +475,29 @@ import {
 import { AiQueueScheduler } from "./ai-queue-scheduler";
 import {
   DEFAULT_AI_ANALYSIS_SETTINGS,
-  normalizeAiAnalysisSettings,
   toWireAiAnalysisSettings,
   type AiAnalysisSettings,
 } from "../shared/ai-analysis-settings";
 import {
   AI_ANALYSIS_QUEUE_BATCH_SIZE,
   DEFAULT_AI_ANALYSIS_CONCURRENCY,
-  normalizeAiAnalysisConcurrency,
 } from "../shared/ai-concurrency";
 import {
   DEFAULT_AI_ANALYSIS_IMAGE_EDGE_PX,
-  normalizeAiAnalysisImageEdgePx,
 } from "../shared/ai-analysis-image";
 import {
   DEFAULT_AI_RELIABILITY_SETTINGS,
-  normalizeAiReliabilitySettings,
   type AiReliabilitySettings,
 } from "../shared/ai-reliability";
 import {
   DEFAULT_AI_API_FORMAT,
-  DEFAULT_AI_LANGUAGES,
   DEFAULT_AI_MODELS,
-  migrateLegacyProviderToApiFormat,
-  normalizeAiLanguages,
   type AiApiFormat,
 } from "../shared/ai-endpoints";
+import {
+  normalizeAiAnalysisPreferences,
+  type AiAnalysisPreferences,
+} from "./ai-analysis-preferences";
 import { createArtifactResponse } from "./artifact-response";
 import { PreviewCache } from "./preview-cache";
 import {
@@ -1245,6 +1272,13 @@ interface AiConfig {
   disclaimerAccepted: boolean;
 }
 
+type LegacyAiConfig = Partial<AiConfig> & {
+  provider?: string;
+  language?: string;
+  apiFormat?: string;
+  languages?: unknown;
+};
+
 const DEFAULT_AI_CONFIG: AiConfig = {
   apiFormat: DEFAULT_AI_API_FORMAT,
   model: DEFAULT_AI_MODELS[DEFAULT_AI_API_FORMAT],
@@ -1265,8 +1299,28 @@ function aiConfigPath(): string {
   return path.join(app.getPath("userData"), "ai-config.json");
 }
 
+function aiProfilesPath(): string {
+  return path.join(app.getPath("userData"), "ai-profiles.json");
+}
+
+function aiAnalysisSettingsPath(): string {
+  return path.join(app.getPath("userData"), "ai-analysis-settings.json");
+}
+
+function aiProfileMigrationPath(): string {
+  return path.join(app.getPath("userData"), "ai-profile-migration.json");
+}
+
+function aiProfileTransactionPath(): string {
+  return path.join(app.getPath("userData"), "ai-profile-transaction.json");
+}
+
 function aiKeyPath(): string {
   return path.join(app.getPath("userData"), "ai-key.enc");
+}
+
+function aiProfileKeyPath(id: string): string {
+  return path.join(app.getPath("userData"), "ai-profile-keys", `${id}.bin`);
 }
 
 // ── Serpent-xffq: 同步服务器（全局）与库绑定持久化 ───────────────────
@@ -1400,95 +1454,318 @@ function resolveSyncServerCredentials(serverId: string): {
   };
 }
 
-function loadAiConfig(): AiConfig & { hasKey: boolean } {
-  try {
-    const raw = readFileSync(aiConfigPath(), "utf-8");
-    const parsed = JSON.parse(raw) as Partial<AiConfig> & {
-      provider?: string;
-      language?: string;
-      apiFormat?: string;
-      languages?: unknown;
-    };
-    const apiFormat =
-      migrateLegacyProviderToApiFormat(parsed.apiFormat) ??
-      migrateLegacyProviderToApiFormat(parsed.provider) ??
-      DEFAULT_AI_CONFIG.apiFormat;
-    const languages = normalizeAiLanguages(
-      parsed.languages ?? parsed.language ?? DEFAULT_AI_LANGUAGES,
-    );
-    const merged: AiConfig = {
-      ...DEFAULT_AI_CONFIG,
-      model: typeof parsed.model === "string" && parsed.model.trim()
-        ? parsed.model
-        : DEFAULT_AI_CONFIG.model,
-      baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : "",
-      descriptionEnabled:
-        parsed.descriptionEnabled ?? DEFAULT_AI_CONFIG.descriptionEnabled,
-      tagEnabled: parsed.tagEnabled ?? DEFAULT_AI_CONFIG.tagEnabled,
-      ratingEnabled:
-        (parsed as { ratingEnabled?: boolean }).ratingEnabled ??
-        DEFAULT_AI_CONFIG.ratingEnabled,
-      analysisSettings: normalizeAiAnalysisSettings({
-        ...DEFAULT_AI_ANALYSIS_SETTINGS,
-        ...((parsed as { analysisSettings?: Partial<AiAnalysisSettings> })
-          .analysisSettings ?? {}),
-        forceExistingTags:
-          (parsed as { analysisSettings?: { forceExistingTags?: boolean } })
-            .analysisSettings?.forceExistingTags ??
-          DEFAULT_AI_ANALYSIS_SETTINGS.forceExistingTags,
-      }),
-      concurrencyLimit: normalizeAiAnalysisConcurrency(parsed.concurrencyLimit),
-      maxAnalysisImageEdgePx: normalizeAiAnalysisImageEdgePx(
-        (parsed as { maxAnalysisImageEdgePx?: unknown }).maxAnalysisImageEdgePx,
-      ),
-      reliabilitySettings: normalizeAiReliabilitySettings(
-        parsed.reliabilitySettings,
-      ),
-      autoAnalyzeEnabled:
-        parsed.autoAnalyzeEnabled ?? DEFAULT_AI_CONFIG.autoAnalyzeEnabled,
-      disclaimerAccepted:
-        parsed.disclaimerAccepted ?? DEFAULT_AI_CONFIG.disclaimerAccepted,
-      apiFormat,
-      languages,
-    };
-    const hasKey = existsSync(aiKeyPath());
-    return { ...merged, hasKey };
-  } catch {
-    const hasKey = existsSync(aiKeyPath());
-    return { ...DEFAULT_AI_CONFIG, hasKey };
+function normalizeLegacyAiAnalysisPreferences(
+  parsed: LegacyAiConfig | null,
+): AiAnalysisPreferences {
+  return normalizeAiAnalysisPreferences(parsed);
+}
+
+function readAiProfileCatalog(required = false): AiProfileCatalog {
+  recoverAiProfileTransactionIfPresent();
+  const raw = readAtomicJsonFile(aiProfilesPath());
+  if (raw === undefined) {
+    if (required) throw new Error("AI profile catalog is missing after migration.");
+    return emptyAiProfileCatalog();
   }
+  return parseAiProfileCatalog(JSON.parse(raw) as unknown);
 }
 
-function saveAiConfig(config: AiConfig): void {
-  const toSave: Record<string, unknown> = {};
-  toSave.apiFormat = config.apiFormat;
-  toSave.model = config.model;
-  toSave.baseUrl = config.baseUrl;
-  toSave.descriptionEnabled = config.descriptionEnabled;
-  toSave.tagEnabled = config.tagEnabled;
-  toSave.ratingEnabled = config.ratingEnabled;
-  toSave.analysisSettings = config.analysisSettings;
-  toSave.concurrencyLimit = config.concurrencyLimit;
-  toSave.maxAnalysisImageEdgePx = config.maxAnalysisImageEdgePx;
-  toSave.reliabilitySettings = config.reliabilitySettings;
-  toSave.languages = config.languages;
-  toSave.autoAnalyzeEnabled = config.autoAnalyzeEnabled;
-  toSave.disclaimerAccepted = config.disclaimerAccepted;
-  writeFileSync(aiConfigPath(), JSON.stringify(toSave, null, 2), "utf-8");
+function aiProfileTransactionIo(): AiProfileTransactionIo {
+  return {
+    readJournal: () => readAtomicJsonFile(aiProfileTransactionPath()) ?? null,
+    writeJournal: (contents) => writeAtomicJsonFile(aiProfileTransactionPath(), contents),
+    writeCredential: (profileId, encryptedCredentialBase64) => {
+      const filename = aiProfileKeyPath(profileId);
+      mkdirSync(path.dirname(filename), { recursive: true });
+      writeFileSync(filename, Buffer.from(encryptedCredentialBase64, "base64"), {
+        mode: 0o600,
+        flush: true,
+      });
+    },
+    deleteCredential: (profileId) => deleteAiProfileCredential(profileId),
+    writeCatalog: (catalog) => {
+      writeAtomicJsonFile(aiProfilesPath(), JSON.stringify(catalog, null, 2));
+    },
+    deleteJournal: () => rmSync(aiProfileTransactionPath(), { force: true }),
+  };
 }
 
-function getDecryptedApiKey(): string {
+function recoverAiProfileTransactionIfPresent(): void {
+  recoverAiProfileTransactionFromJournal(aiProfileTransactionIo());
+}
+
+function commitAiProfileCatalogTransaction(
+  profileId: string,
+  catalog: AiProfileCatalog,
+  credential: AiProfileCredentialMutation,
+): void {
+  commitAiProfileTransactionToJournal({
+    version: 1,
+    profileId,
+    credential,
+    catalog,
+  }, aiProfileTransactionIo());
+}
+
+function readAiAnalysisPreferences(): AiAnalysisPreferences {
+  const raw = readAtomicJsonFile(aiAnalysisSettingsPath());
+  if (raw === undefined) return normalizeLegacyAiAnalysisPreferences(null);
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("AI analysis preferences have an invalid structure.");
+  }
+  return normalizeAiAnalysisPreferences(parsed);
+}
+
+function hasAiProfileCredential(profileId: string): boolean {
+  return existsSync(aiProfileKeyPath(profileId));
+}
+
+function readAiProfileCredential(profileId: string): string {
   try {
-    const encrypted = readFileSync(aiKeyPath());
-    return safeStorage.decryptString(encrypted);
+    return safeStorage.decryptString(readFileSync(aiProfileKeyPath(profileId)));
   } catch {
     throw new Error("AI API key not configured or could not be decrypted.");
   }
 }
 
-function saveEncryptedApiKey(apiKey: string): void {
-  const encrypted = safeStorage.encryptString(apiKey);
-  writeFileSync(aiKeyPath(), encrypted);
+function writeAiProfileCredential(profileId: string, apiKey: string): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("Secure credential storage is unavailable.");
+  }
+  const filename = aiProfileKeyPath(profileId);
+  mkdirSync(path.dirname(filename), { recursive: true });
+  writeFileSync(filename, safeStorage.encryptString(apiKey), { mode: 0o600, flush: true });
+}
+
+function deleteAiProfileCredential(profileId: string): void {
+  rmSync(aiProfileKeyPath(profileId), { force: true });
+}
+
+function cleanupOrphanAiProfileCredentials(catalog: AiProfileCatalog): void {
+  const directory = path.join(app.getPath("userData"), "ai-profile-keys");
+  if (!existsSync(directory)) return;
+
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    logger?.error("ai.profile-keys.orphan-cleanup", error);
+    return;
+  }
+
+  const knownProfileIds = new Set(catalog.profiles.map((profile) => profile.id));
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".bin")) continue;
+    const profileId = entry.name.slice(0, -".bin".length);
+    if (!isAiProfileId(profileId) || knownProfileIds.has(profileId)) continue;
+    try {
+      rmSync(path.join(directory, entry.name), { force: true });
+    } catch (error) {
+      // Migration is still usable; this runs on every load so failed removals retry.
+      logger?.error("ai.profile-keys.orphan-cleanup", error);
+    }
+  }
+}
+
+function ensureAiProfileMigration(): void {
+  recoverAiProfileTransactionIfPresent();
+  const markerPath = aiProfileMigrationPath();
+  const markerContents = readAtomicJsonFile(markerPath);
+  let markerVersion: number | null = null;
+  if (markerContents !== undefined) {
+    const marker: unknown = JSON.parse(markerContents);
+    if (!marker || typeof marker !== "object" || Array.isArray(marker)) {
+      throw new Error("AI profile migration marker has an invalid structure.");
+    }
+    const version = (marker as { version?: unknown }).version;
+    if (version !== 1) throw new Error("AI profile migration marker has an unsupported version.");
+    markerVersion = version;
+  }
+
+  runAiProfileMigrationStartup<LegacyAiConfig, void>({
+    markerVersion,
+    readLegacyConfig: () => readFileSync(aiConfigPath()),
+    recoverCompletedMigration: () => {
+      const catalog = readAiProfileCatalog(true);
+      cleanupOrphanAiProfileCredentials(catalog);
+      cleanupLegacyAiConfig();
+    },
+    migrate: (legacy) => {
+      const legacyKeyExists = existsSync(aiKeyPath());
+      migrateAiProfileStorage({
+        markerExists: () => false,
+        readCatalog: () => existsSync(aiProfilesPath()) ? readAiProfileCatalog() : null,
+        cleanupOrphanCredentials: cleanupOrphanAiProfileCredentials,
+        readPreferences: () => {
+          if (!existsSync(aiAnalysisSettingsPath())) return null;
+          return JSON.parse(readFileSync(aiAnalysisSettingsPath(), "utf-8")) as unknown;
+        },
+        legacyProfile: legacy !== null || legacyKeyExists
+          ? legacyAiConnectionProfile({
+              apiFormat: legacy?.apiFormat,
+              provider: legacy?.provider,
+              model: legacy?.model,
+              baseUrl: legacy?.baseUrl,
+            })
+          : null,
+        readLegacyCredential: () => legacyKeyExists
+          ? safeStorage.decryptString(readFileSync(aiKeyPath()))
+          : null,
+        writeCredential: writeAiProfileCredential,
+        verifyCredential: (profileId) => { readAiProfileCredential(profileId); },
+        defaultPreferences: normalizeLegacyAiAnalysisPreferences(null),
+        normalizeLegacyPreferences: () => legacy
+          ? normalizeLegacyAiAnalysisPreferences(legacy)
+          : null,
+        writeCatalog: (catalog) => {
+          writeAtomicJsonFile(aiProfilesPath(), JSON.stringify(catalog, null, 2));
+        },
+        writePreferences: (preferences) => {
+          writeAtomicJsonFile(aiAnalysisSettingsPath(), JSON.stringify(preferences, null, 2));
+        },
+        writeMarker: () => {
+          writeAtomicJsonFile(markerPath, JSON.stringify({ version: 1 }, null, 2));
+        },
+        cleanupLegacy: cleanupLegacyAiConfig,
+      });
+    },
+  });
+}
+
+function cleanupLegacyAiConfig(): void {
+  try {
+    rmSync(aiConfigPath(), { force: true });
+    rmSync(aiKeyPath(), { force: true });
+  } catch (error) {
+    logger?.error("ai.profile-migration.cleanup", error);
+  }
+}
+
+function loadAiConfig(): AiConfig & {
+  hasKey: boolean;
+  activeProfileId: string | null;
+  profiles: ReturnType<typeof summarizeAiProfiles>;
+} {
+  try {
+    ensureAiProfileMigration();
+    const catalog = readAiProfileCatalog();
+    const profile = catalog.profiles.find((item) => item.id === catalog.activeProfileId);
+    const preferences = readAiAnalysisPreferences();
+    return {
+      ...(profile ?? {
+        apiFormat: DEFAULT_AI_CONFIG.apiFormat,
+        model: DEFAULT_AI_CONFIG.model,
+        baseUrl: DEFAULT_AI_CONFIG.baseUrl,
+      }),
+      ...preferences,
+      activeProfileId: profile?.id ?? null,
+      profiles: summarizeAiProfiles(catalog, hasAiProfileCredential),
+      hasKey: profile ? hasAiProfileCredential(profile.id) : false,
+    };
+  } catch (error) {
+    if (error instanceof AiProfileStorageError) throw error;
+    throw new AiProfileStorageError(error);
+  }
+}
+
+function saveAiConfig(config: AiConfig): void {
+  ensureAiProfileMigration();
+  const preferences: AiAnalysisPreferences = {
+    descriptionEnabled: config.descriptionEnabled,
+    tagEnabled: config.tagEnabled,
+    ratingEnabled: config.ratingEnabled,
+    analysisSettings: config.analysisSettings,
+    concurrencyLimit: config.concurrencyLimit,
+    maxAnalysisImageEdgePx: config.maxAnalysisImageEdgePx,
+    reliabilitySettings: config.reliabilitySettings,
+    languages: config.languages,
+    autoAnalyzeEnabled: config.autoAnalyzeEnabled,
+    disclaimerAccepted: config.disclaimerAccepted,
+  };
+  writeAtomicJsonFile(aiAnalysisSettingsPath(), JSON.stringify(preferences, null, 2));
+}
+
+function saveAiConnectionProfile(
+  draft: AiConnectionProfileDraft & { apiKey?: string; clearCredential?: boolean },
+): string {
+  ensureAiProfileMigration();
+  const catalog = readAiProfileCatalog();
+  const profileId = draft.id ?? createAiProfileId();
+  const next = saveAiProfileInCatalog(catalog, { ...draft, id: profileId });
+  const key = draft.apiKey?.trim();
+  let credential: AiProfileCredentialMutation = { kind: "preserve" };
+  if (key) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("Secure credential storage is unavailable.");
+    }
+    credential = {
+      kind: "write",
+      encryptedCredentialBase64: safeStorage.encryptString(key).toString("base64"),
+    };
+  } else if (draft.clearCredential) {
+    credential = { kind: "delete" };
+  }
+  commitAiProfileCatalogTransaction(profileId, next, credential);
+  return profileId;
+}
+
+function activateAiConnectionProfile(profileId: string): void {
+  ensureAiProfileMigration();
+  if (!hasAiProfileCredential(profileId)) {
+    throw new AiProfileValidationError("AI profile has no saved credential.");
+  }
+  readAiProfileCredential(profileId);
+  const next = activateAiProfile(readAiProfileCatalog(), profileId);
+  commitAiProfileCatalogTransaction(profileId, next, { kind: "preserve" });
+}
+
+function deleteAiConnectionProfile(profileId: string): void {
+  ensureAiProfileMigration();
+  const catalog = readAiProfileCatalog();
+  const next = deleteAiProfile(catalog, profileId);
+  commitAiProfileCatalogTransaction(profileId, next, { kind: "delete" });
+}
+
+function getDecryptedApiKey(): string {
+  const activeProfileId = loadAiConfig().activeProfileId;
+  return resolveAiCredential(
+    activeProfileId,
+    hasCompletedAiProfileMigration(),
+    readAiProfileCredential,
+    () => {
+      // Keep the previous installation usable if migration cannot finish
+      // because the new profile files or secure storage are temporarily unavailable.
+      try {
+        return safeStorage.decryptString(readFileSync(aiKeyPath()));
+      } catch {
+        throw new Error("AI API key not configured.");
+      }
+    },
+  );
+}
+
+function hasCompletedAiProfileMigration(): boolean {
+  try {
+    const marker = JSON.parse(readFileSync(aiProfileMigrationPath(), "utf-8")) as {
+      version?: unknown;
+    };
+    return marker.version === 1;
+  } catch {
+    return false;
+  }
+}
+
+function getDecryptedProfileApiKey(profileId: string): string {
+  try {
+    if (!readAiProfileCatalog().profiles.some((profile) => profile.id === profileId)) {
+      throw new Error("AI profile does not exist.");
+    }
+    return readAiProfileCredential(profileId);
+  } catch (error) {
+    if (error instanceof AiProfileStorageError) throw error;
+    throw new AiProfileStorageError(error);
+  }
 }
 
 function focusMainWindow(): boolean {
@@ -2731,11 +3008,11 @@ async function enqueueAutoAnalyzeAfterImport(
   importedAssetIds: string[],
   folderId?: string,
 ): Promise<void> {
-  const config = loadAiConfig();
-  if (!config.autoAnalyzeEnabled || !config.hasKey || !config.apiFormat) return;
-  if ((importedAssetIds.length === 0 && !folderId) || !workerClient) return;
-
   try {
+    const config = loadAiConfig();
+    if (!config.autoAnalyzeEnabled || !config.hasKey || !config.apiFormat) return;
+    if ((importedAssetIds.length === 0 && !folderId) || !workerClient) return;
+
     const result = await workerClient.request({
       type: "ai.enqueue-analysis",
       libraryId,
@@ -2756,9 +3033,13 @@ async function enqueueAutoAnalyzeAfterImport(
 }
 
 async function processAiQueue(libraryId: string): Promise<void> {
-  const config = loadAiConfig();
-  aiQueueScheduler.setRetryPolicy(config.reliabilitySettings);
-  await aiQueueScheduler.trigger(libraryId);
+  try {
+    const config = loadAiConfig();
+    aiQueueScheduler.setRetryPolicy(config.reliabilitySettings);
+    await aiQueueScheduler.trigger(libraryId);
+  } catch (error) {
+    logger?.error("ai.queue.config", error, { libraryId });
+  }
 }
 
 /** Global menu preference: linked-folder assets with a missing source stay listed. */
@@ -2817,10 +3098,32 @@ async function processAiQueueBatch(
   libraryId: string,
   maxJobs: number,
 ): Promise<{ processed: number; requeued: number }> {
-  const config = loadAiConfig();
-  if (!config.hasKey || !workerClient) return { processed: 0, requeued: 0 };
+  let config: ReturnType<typeof loadAiConfig>;
   try {
-    const apiKey = getDecryptedApiKey();
+    config = loadAiConfig();
+  } catch (error) {
+    logger?.error("ai.queue.config", error, { libraryId });
+    return { processed: 0, requeued: 0 };
+  }
+  const activeProfile = config.profiles.find(
+    (profile) => profile.id === config.activeProfileId,
+  );
+  const legacyFallbackAvailable = !activeProfile
+    && !hasCompletedAiProfileMigration()
+    && Boolean(config.apiFormat);
+  if (!config.hasKey || !workerClient || (!activeProfile && !legacyFallbackAvailable)) {
+    return { processed: 0, requeued: 0 };
+  }
+  try {
+    const profile = activeProfile ?? legacyAiConnectionProfile({
+      apiFormat: config.apiFormat,
+      model: config.model,
+      baseUrl: config.baseUrl,
+    });
+    const apiKey = activeProfile
+      ? getDecryptedProfileApiKey(activeProfile.id)
+      : getDecryptedApiKey();
+    const connection = captureAiConnectionSnapshot(profile, apiKey);
     // Keep each Worker admission bounded. A 32-job batch with 16 external
     // waits used to be one long scheduler request; slice it into short
     // continuations so claim/commit ownership is reacquired between waves.
@@ -2832,10 +3135,10 @@ async function processAiQueueBatch(
       const result = await workerClient.request({
         type: "ai.process-queue",
         libraryId,
-        apiFormat: config.apiFormat,
-        model: config.model,
-        apiKey,
-        ...(config.baseUrl.trim() ? { baseUrl: config.baseUrl.trim() } : {}),
+        apiFormat: connection.apiFormat,
+        model: connection.model,
+        apiKey: connection.apiKey,
+        ...(connection.baseUrl.trim() ? { baseUrl: connection.baseUrl.trim() } : {}),
         enabledFields: {
           description: config.descriptionEnabled,
           tags: config.tagEnabled,
@@ -3163,6 +3466,9 @@ async function commandFor(
     }
     case "ai.config.get.request":
     case "ai.config.set.request":
+    case "ai.profiles.save.request":
+    case "ai.profiles.activate.request":
+    case "ai.profiles.delete.request":
     case "ai.list-models.request":
     case "ai.test-connection.request":
     case "ai.clear-content.request": {
@@ -3429,8 +3735,11 @@ async function handleLibraryRequest(
     const aiOwnedResult = await tryHandleAiOwnedRequest(request, {
       loadAiConfig,
       getDecryptedApiKey,
+      getDecryptedProfileApiKey,
       saveAiConfig,
-      saveEncryptedApiKey,
+      saveConnectionProfile: saveAiConnectionProfile,
+      activateConnectionProfile: activateAiConnectionProfile,
+      deleteConnectionProfile: deleteAiConnectionProfile,
       workerAvailable: () => Boolean(workerClient),
       requestWorker: (command) => {
         if (!workerClient) throw new Error("Library Worker is unavailable.");

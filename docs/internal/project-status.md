@@ -1,5 +1,7 @@
 # Serpent 项目状态
 
+- **2026-10-20 缩略图与视频 proxy 加速方案（尚未实施）**：已核查当前 LibraryService 的 FFmpeg/ffprobe 跨库单槽位、默认受限线程，以及 Windows Media Foundation 探针/生产缺少显式硬件参数的问题。方案覆盖阶段计时、硬件优先与回退、原子内存/槽位准入、短探针与封面/长转码分类、probe 复用、进程与临时文件回收及正式混合媒体基准。与导入算法加速分开归因，未改变产品代码或人工验收状态；无本轮性能改善或平台通过结论。见[实施方案](implementation/2026-10-20-thumbnail-proxy-acceleration-plan.md)与[核查记录](research/2026-10-20-thumbnail-proxy-concurrency-audit.md)。
+
 - **2026-10-20 导入加速第一阶段验证中（`Serpent-8h9qg.1`）**：名称索引与阶段目录缓存、当前版本内容查重、序列算法已落盘；已追加 v59 additive 指纹索引迁移，其他开发不得复用该版本号。完整资源库可用性 234 项通过 / 1 跳过，正式 20k 混合媒体 Worker 性能 3 项通过；独立审查两项 P2 已修，真实 Electron 冲突、序列和完整退出重启解码通过。最终 `verify:mainline` 的 lint/typecheck/extension 与资源库门禁通过，但全仓 `npm test` 显示三项失败后超过 5 分钟无进展而被中断，完整错误和根因未知；之后门禁未执行，不能写全仓通过。原生桌面 Computer Use 和人工验收仍未完成。复制哈希融合和事务子批另列后续阶段。见[方案](implementation/2026-10-19-import-acceleration-plan.md)、[QA](qa/2026-10-19-import-acceleration.md)与[开发记录](development/2026-10-19-import-acceleration-development-log.md)。
 
 - **2026-10-18 资产拖入回收站已获用户确认（`Serpent-tm8sy`）**：修复 Electron Windows/Linux 原生源仅允许 copy/link，而回收站强制 move 的操作冲突；传输操作按 `effectAllowed` 协商，Worker 仍执行真正的移动/回收站业务。并保留对可信 drop 的任务级延后清理，避免 React 处理前丢失内部拖拽身份。用户手动确认当前单资产路径恢复，`DND-002` 标明这一验收范围；批量及其他平台没有独立人工证据。定向 70 项与类型检查通过；此前全量门禁未通过和测试清理策略阻断仍保留，不能写为全仓绿。详见[开发日志](development/2026-10-18-trash-drag-regression-development-log.md)。

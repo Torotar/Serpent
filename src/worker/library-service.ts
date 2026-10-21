@@ -7459,9 +7459,9 @@ export class LibraryService {
             modified_at: string | null;
           } | undefined;
 
-        let stat: Awaited<ReturnType<typeof lstatAsync>>;
+        let stat: Stats | BigIntStats;
         try {
-          stat = await lstatAsync(absolutePath);
+          stat = await lstatAsync(absolutePath, { bigint: true });
         } catch (error) {
           if (!isMissingPathError(error)) return null;
           if (existing) missingAssetIds.push(existing.asset_id);
@@ -46317,14 +46317,14 @@ export class LibraryService {
               pendingDirectories.push({ absolutePath, relativePath });
             }
           } else if (child.isFile()) {
-            let stat: Awaited<ReturnType<typeof lstatAsync>>;
+            let stat: Stats | BigIntStats;
             try {
               // Keep the existing synchronous stat seam for deterministic tests;
               // production uses the promise API so a slow volume cannot block the
               // Worker event loop during open reconciliation.
               stat = this.options.assetLstat
                 ? this.options.assetLstat(absolutePath)
-                : await lstatAsync(absolutePath);
+                : await lstatAsync(absolutePath, { bigint: true });
             } catch (error) {
               if (isUnreadablePathError(error)) continue;
               throw new LibraryServiceError(input.errorCode, { cause: error });
@@ -46341,7 +46341,7 @@ export class LibraryService {
                   && isDefaultIgnoredAssetEntry(child.name, 'file'))
                 && !input.explicitlyIgnored(normalized, 'asset')
               ) {
-                const byteSize = stat.size;
+                const byteSize = Number(stat.size);
                 if (!Number.isSafeInteger(byteSize)) {
                   throw new LibraryServiceError(input.errorCode, {
                     reason: 'UNSUPPORTED_FILE_ENTRY',
