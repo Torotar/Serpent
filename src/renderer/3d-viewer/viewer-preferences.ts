@@ -31,12 +31,15 @@ export interface Viewer3dPreferences {
   lightIntensity: number;
   /** Display mode (PBR / wireframe / gray-shaded, Serpent-fkhe). */
   displayMode: ModelDisplayMode;
+  /** Draw both faces. Off leaves each material's own side unchanged. */
+  doubleSided: boolean;
 }
 
 export const DEFAULT_VIEWER3D_PREFERENCES: Viewer3dPreferences = {
   presetId: DEFAULT_HDRI_PRESET_ID,
   lightIntensity: DEFAULT_LIGHT_INTENSITY,
   displayMode: DEFAULT_DISPLAY_MODE,
+  doubleSided: false,
 };
 
 export interface Viewer3dPreferencesStorage {
@@ -59,6 +62,7 @@ export function parseViewer3dPreferences(input: unknown): Viewer3dPreferences {
     displayMode: MODEL_DISPLAY_MODES.includes(candidate.displayMode as ModelDisplayMode)
       ? (candidate.displayMode as ModelDisplayMode)
       : DEFAULT_DISPLAY_MODE,
+    doubleSided: candidate.doubleSided === true,
   };
 }
 
@@ -86,6 +90,7 @@ export function saveViewer3dPreferences(
       presetId: preferences.presetId,
       lightIntensity: clampLightIntensity(preferences.lightIntensity),
       displayMode: preferences.displayMode,
+      doubleSided: preferences.doubleSided === true,
     }),
   );
 }

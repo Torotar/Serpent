@@ -8879,6 +8879,9 @@ function AppInner() {
     copyFolder: (folderId) => {
       void handleCopyFolder(folderId);
     },
+    copyFolderPath: (folderId) => {
+      void handleCopyFolderPath(folderId);
+    },
     pasteIntoFolder: (folderId) => {
       dispatchClipboardPaste(folderId);
     },

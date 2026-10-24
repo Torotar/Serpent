@@ -1392,12 +1392,13 @@ export const zhCN = {
         openExternal: "用系统程序打开",
         revealInFolder: "在文件管理器显示",
         showInLibraryFolder: "在库内定位",
-        copyFilePath: "复制路径",
+        copyFilePath: "复制文件路径",
         rename: "重命名资产",
         moveToTrash: "移入回收站",
         deleteFromDisk: "从硬盘删除",
       },
       folder: {
+        copyPath: "复制文件夹路径",
         openInFileManager: "在文件管理器显示文件夹",
         createSubfolder: "新建子文件夹",
         rename: "重命名文件夹",
@@ -2268,6 +2269,7 @@ export const zhCN = {
       "shaded-wireframe": "网格灰模",
       wireframe: "纯网格"
     },
+    doubleSided: "双面",
     resetView: "重置视角",
     toggleStats: "显示或隐藏统计",
     statsAria: "模型统计",

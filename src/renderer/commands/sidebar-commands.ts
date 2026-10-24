@@ -193,6 +193,10 @@ export const sidebarCommandDefinitions: readonly SidebarCommandDefinition[] = [
     id: 'folder.copy-path',
     title: (ctx) => translateForLocale(ctx.locale, 'command.folder.copyPath'),
     group: 'organize',
+    shortcut: {
+      mac: { label: '⌥⌘C', key: 'c', metaKey: true, altKey: true },
+      windows: { label: 'Ctrl+Shift+C', key: 'c', ctrlKey: true, shiftKey: true },
+    },
     visible: (ctx) => ctx.menuKind === 'folder',
     disabledReason: offlineReason,
     run: (ctx) => ctx.actions.copyFolderPath(revealFolderId(ctx)),

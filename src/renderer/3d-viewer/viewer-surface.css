@@ -117,6 +117,13 @@
   background: color-mix(in srgb, var(--ui-action-accent) 78%, transparent);
 }
 
+.model-viewer-toolbar-button.is-labeled {
+  width: auto;
+  padding: 0 8px;
+  font-size: calc(12px * var(--ui-font-scale));
+  white-space: nowrap;
+}
+
 /* Stats readout: bottom-left corner panel. */
 .model-viewer-stats {
   position: absolute;

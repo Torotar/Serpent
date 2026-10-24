@@ -96,6 +96,14 @@
 
 ## 当前待人类验收队列
 
+### 2026-10-24 FBX basecolor 贴图透明
+
+| ID | 功能 | 状态 | 人类操作 | 预期结果 | 证据 | 结果/反馈 |
+| --- | --- | --- | --- | --- | --- | --- |
+| MODEL-FBX-ALPHA-01 | FBX 查看和模型缩略图按 basecolor 的 alpha 裁切 | 待人类验收 | ① 用开发态打开一张 basecolor 贴图带透明区域的卡片叶或贴花。② 打开查看器，转到叶片边缘，看透明区域是否露出后面的几何和背景。③ 再打开一套 alpha 通道本身全是不透明的落叶模型，确认外形仍是网格剪影。④ 回到浏览页看卡片预览。 | alpha 低于一半的像素被裁掉，不再铺成整块深色矩形。alpha 全不透明的贴图外观不变。已经在混合或已经在裁切的材质保持原样。 | `src/renderer/3d-viewer/base-color-alpha.ts` / `src/renderer/3d-viewer/loader-registry.ts` / `tests/unit/base-color-alpha.test.ts` | 2026-10-24 用户确认这批模型的覆盖信息不在 basecolor 贴图里，按 basecolor alpha 裁切后外形不变。浏览器解不开的贴图仍解成像素再上传，已缓存的模型会按新转换版本重做。待用 basecolor 自带透明区域的模型再验。真实画面、packaged 与 macOS 未执行。 |
+| MODEL-VIEW-DOUBLESIDE-01 | 3D 查看器工具栏可打开双面显示 | 人类验收通过 | ① 用开发态打开一个单面片模型。② 点工具栏「双面」并转到背面。③ 关掉查看器再打开，先不要点「双面」。④ 切换灰模和网格后再看背面。⑤ 关掉双面，退出后重开。 | 再次进入时背面已经可见；灰模和网格同样双面；关掉后恢复原朝向，重开保持关闭。 | `src/renderer/3d-viewer/model-display-mode.ts` / `src/renderer/3d-viewer/scene-composer.ts` / `src/renderer/3d-viewer/viewer-surface.tsx` / `tests/unit/3d-viewer-scene-composer.test.ts` | 2026-10-24 用户确认验收通过。 |
+| COPY-PATH-01 | 复制文件路径和文件夹路径，快捷键可改 | 待人类验收 | ① 右键一个可用资产，看「复制文件路径」右侧的快捷键。② 按该键，把剪贴板贴到资源管理器地址栏。③ 打开该资产的查看器，右键看同一项，再按快捷键并粘贴。④ 不选资产，选中或打开一个文件夹，按同一默认键并粘贴。⑤ 在设置里把「复制文件路径」改成别的组合键，再按新键和原来的 Ctrl+Shift+C。⑥ 焦点放在搜索框里按当前组合键。 | ① 默认显示 Ctrl+Shift+C，macOS 默认是 Option+Command+C。改键后菜单跟着变。②③ 剪贴板是该文件的路径，并出现「文件路径已复制到剪贴板」。查看器右键也能复制正在看的资产。④ 剪贴板是该文件夹的路径，并出现「文件夹路径已复制到剪贴板」。选中资产时同一默认键仍复制文件。⑤ 只有新键复制路径，原来的 Ctrl+Shift+C 不再复制。⑥ 搜索框里的文字不变，不复制路径。 | `src/shared/shortcut-catalog.ts` / `src/renderer/use-folder-command-shortcuts.ts` / `src/shared/browse-keyboard-shortcuts.ts` / `src/renderer/ViewerContextMenu.tsx` / `tests/unit/browse-keyboard-shortcuts.test.ts` | 复制路径走当前快捷键绑定。文件夹使用同一默认组合键，范围与资产分开，两边都可以在快捷键设置里单独修改。真实按键、packaged 与 macOS 未执行。 |
+
 ### 2026-10-17 侧栏文件夹自定义顺序
 
 | ID | 功能 | 状态 | 人类操作 | 预期结果 | 证据 | 结果/反馈 |

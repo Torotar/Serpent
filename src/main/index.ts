@@ -2370,7 +2370,7 @@ async function createMainWindow(): Promise<void> {
         if (appAction) forwardApplicationShortcutToWindow(window, appAction);
         return;
       }
-      const browseAction = matchBrowseKeyboardShortcut({
+      const browseInput = {
         type: input.type,
         code: input.code,
         key: input.key,
@@ -2379,9 +2379,25 @@ async function createMainWindow(): Promise<void> {
         meta: input.meta,
         alt: input.alt,
         shift: input.shift,
+      };
+      const browseAction = matchBrowseKeyboardShortcut(browseInput, {
+        bindings: readShortcutBindingsSnapshot(),
+        platform: shortcutPlatformFromProcess(process.platform),
       });
       if (browseAction) {
-        forwardBrowseShortcut(window.webContents, browseAction);
+        if (browseAction === "copy-path") {
+          event.preventDefault();
+          forwardBrowseShortcut(window.webContents, browseAction, {
+            key: input.key,
+            code: input.code,
+            ctrlKey: input.control,
+            metaKey: input.meta,
+            altKey: input.alt,
+            shiftKey: input.shift,
+          });
+        } else {
+          forwardBrowseShortcut(window.webContents, browseAction);
+        }
       }
     }
     if (!isViewerVideoShortcutContentsActive(window.webContents.id)) {

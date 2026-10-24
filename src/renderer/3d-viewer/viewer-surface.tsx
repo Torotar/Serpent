@@ -147,6 +147,7 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
   const [displayMode, setDisplayMode] = useState<ModelDisplayMode>(
     preferences.displayMode ?? DEFAULT_DISPLAY_MODE,
   );
+  const [doubleSided, setDoubleSided] = useState(preferences.doubleSided === true);
 
   const persistPreferences = useCallback((next: typeof preferences) => {
     setPreferences(next);
@@ -171,6 +172,14 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
     (mode: ModelDisplayMode) => {
       setDisplayMode(mode);
       persistPreferences({ ...preferences, displayMode: mode });
+    },
+    [persistPreferences, preferences],
+  );
+
+  const handleDoubleSidedChange = useCallback(
+    (enabled: boolean) => {
+      setDoubleSided(enabled);
+      persistPreferences({ ...preferences, doubleSided: enabled });
     },
     [persistPreferences, preferences],
   );
@@ -371,6 +380,10 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
       controls.saveState();
 
       setupGroundShadow(composer.scene, sphere, bounds.min.y);
+      // Preferences are applied when the composer is created, before this
+      // model exists. Re-apply so a saved double-sided (or wireframe) choice
+      // is on the materials for the first frame.
+      composer.reapplyDisplay();
 
       // Stats (3D-13, loaded result is the source of truth) + limits (3D-14).
       const computedStats = countSceneStats(loaded.scene);
@@ -470,6 +483,10 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
   useEffect(() => {
     composerRef.current?.setDisplayMode(displayMode);
   }, [displayMode, loadEpoch]);
+
+  useEffect(() => {
+    composerRef.current?.setDoubleSided(doubleSided);
+  }, [doubleSided, loadEpoch]);
 
   // HDRI environment swap (3D-09). The old handle is disposed only after the
   // new one is ready so the view never goes dark between presets. `loadEpoch`
@@ -583,9 +600,11 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
         <>
           <ModelViewerToolbar
             displayMode={displayMode}
+            doubleSided={doubleSided}
             lightIntensity={lightIntensity}
             isFullscreen={props.isFullscreen}
             onDisplayModeChange={handleDisplayModeChange}
+            onDoubleSidedChange={handleDoubleSidedChange}
             onLightIntensityChange={handleLightIntensityChange}
             onFullscreen={props.onFullscreen}
             onPresetChange={handlePresetChange}

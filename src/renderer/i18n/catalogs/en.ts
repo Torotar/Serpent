@@ -1411,12 +1411,13 @@ export const en = {
         openExternal: "Open with system app",
         revealInFolder: "Reveal in file manager",
         showInLibraryFolder: "Show in library folder",
-        copyFilePath: "Copy path",
+        copyFilePath: "Copy file path",
         rename: "Rename asset",
         moveToTrash: "Move to Trash",
         deleteFromDisk: "Delete from disk",
       },
       folder: {
+        copyPath: "Copy folder path",
         openInFileManager: "Reveal folder in file manager",
         createSubfolder: "New subfolder",
         rename: "Rename folder",
@@ -2285,6 +2286,7 @@ export const en = {
       "shaded-wireframe": "Gray + wireframe",
       wireframe: "Wireframe"
     },
+    doubleSided: "Double-sided",
     resetView: "Reset view",
     toggleStats: "Show or hide stats",
     statsAria: "Model statistics",

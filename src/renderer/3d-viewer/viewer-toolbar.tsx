@@ -25,11 +25,13 @@ export interface ModelViewerToolbarProps {
   readonly presetId: HdriPresetId;
   readonly lightIntensity: number;
   readonly displayMode: ModelDisplayMode;
+  readonly doubleSided: boolean;
   readonly statsVisible: boolean;
   readonly isFullscreen: boolean;
   onPresetChange(presetId: HdriPresetId): void;
   onLightIntensityChange(intensity: number): void;
   onDisplayModeChange(mode: ModelDisplayMode): void;
+  onDoubleSidedChange(enabled: boolean): void;
   onToggleStats(): void;
   onResetView(): void;
   onFullscreen(): void;
@@ -176,6 +178,17 @@ export function ModelViewerToolbar(props: ModelViewerToolbarProps) {
           ))}
         </select>
       </label>
+      <button
+        aria-label={t('viewer3d.doubleSided')}
+        aria-pressed={props.doubleSided}
+        className={`model-viewer-toolbar-button is-labeled${props.doubleSided ? ' is-active' : ''}`}
+        data-hover-tip={t('viewer3d.doubleSided')}
+        onClick={() => props.onDoubleSidedChange(!props.doubleSided)}
+        tabIndex={0}
+        type="button"
+      >
+        {t('viewer3d.doubleSided')}
+      </button>
       <label className="model-viewer-toolbar-item is-light-intensity">
         <span className="model-viewer-toolbar-label">{t('viewer3d.lightIntensity')}</span>
         <input

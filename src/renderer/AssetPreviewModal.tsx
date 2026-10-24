@@ -78,6 +78,8 @@ import {
   shouldShowProxyPlaybackNotice,
 } from "./ProxyPlaybackNotice";
 import { shouldCopyAssetOnShortcut } from "./viewer-copy-shortcut";
+import { matchAssetActionKeyboardCommand } from "./asset-action-keyboard";
+import { formatRuntimeShortcut } from "./shortcut-runtime";
 import {
   ViewerSessionController,
   type ViewerSessionIdentity,
@@ -954,7 +956,9 @@ const AssetPreviewModalContent = forwardRef<
     asset.mediaType === "video" ||
     illustratorPdfPreview;
   const fitShortcut = viewerTransformable ? "Numpad ." : undefined;
-  const copyShortcut = isMacPlatform(navigator.userAgent) ? "⌘C" : "Ctrl+C";
+  const shortcutPlatform = isMacPlatform(navigator.userAgent) ? "mac" : "windows";
+  const copyShortcut = shortcutPlatform === "mac" ? "⌘C" : "Ctrl+C";
+  const copyPathShortcut = formatRuntimeShortcut("asset.copy-file-path", shortcutPlatform);
 
   // A preloading viewer must not leave the old viewer waiting forever when
   // the target is unsupported or its preview request has failed. In those
@@ -1080,6 +1084,19 @@ const AssetPreviewModalContent = forwardRef<
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleTextSave, isTextViewer, preloadOnly]);
 
+  const copyViewerFilePath = useCallback(async () => {
+    if (asset.deletedAt || asset.availability !== "available") return;
+    const result = await api.copyFilePath({
+      libraryId,
+      assetId: asset.assetId,
+    });
+    if (!result.ok) {
+      setError(requestFailureMessage(t("toast.copyPathFailed"), result.error, t));
+      return;
+    }
+    onInfoNotice?.(t("toast.copyPathDone"));
+  }, [api, asset.assetId, asset.availability, asset.deletedAt, libraryId, onInfoNotice, setError, t]);
+
   const copyViewerAsset = useCallback(async () => {
     // Serpent-f8e175: 与右键「复制」一致，把当前资产源文件复制到剪贴板。
     const result = await api.copyAssetFiles({
@@ -1100,6 +1117,15 @@ const AssetPreviewModalContent = forwardRef<
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (
+        matchAssetActionKeyboardCommand(
+          "asset.copy-file-path",
+          event,
+          shortcutPlatform,
+        )
+      ) {
+        return;
+      }
+      if (
         !shouldCopyAssetOnShortcut({
           isTextViewer,
           metaOrCtrl: event.metaKey || event.ctrlKey,
@@ -1115,7 +1141,7 @@ const AssetPreviewModalContent = forwardRef<
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [copyViewerAsset, isTextViewer, preloadOnly]);
+  }, [copyViewerAsset, isTextViewer, preloadOnly, shortcutPlatform]);
 
   useEffect(() => {
     setViewerContextMenu(null);
@@ -1575,6 +1601,12 @@ const AssetPreviewModalContent = forwardRef<
         {viewerContextMenu && viewerContextMenuAvailable ? (
           <ViewerContextMenu
             copyShortcut={copyShortcut}
+            copyPathShortcut={copyPathShortcut}
+            onCopyFilePath={
+              asset.deletedAt || asset.availability !== "available"
+                ? undefined
+                : () => void copyViewerFilePath()
+            }
             flipHorizontal={displayTransform.flipHorizontal}
             flipVertical={displayTransform.flipVertical}
             fitShortcut={fitShortcut}

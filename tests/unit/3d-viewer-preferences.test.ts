@@ -27,6 +27,7 @@ describe('viewer3d preferences (Serpent-qvc6 / 3D-09/3D-10 persistence)', () => 
       presetId: DEFAULT_HDRI_PRESET_ID,
       lightIntensity: DEFAULT_LIGHT_INTENSITY,
       displayMode: 'pbr',
+      doubleSided: false,
     });
     expect(loadViewer3dPreferences()).toEqual(DEFAULT_VIEWER3D_PREFERENCES);
   });
@@ -34,7 +35,7 @@ describe('viewer3d preferences (Serpent-qvc6 / 3D-09/3D-10 persistence)', () => 
   it('round-trips saved preferences', () => {
     const storage = memoryStorage();
     saveViewer3dPreferences(
-      { presetId: 'dancing-hall', lightIntensity: 1.7, displayMode: 'wireframe' },
+      { presetId: 'dancing-hall', lightIntensity: 1.7, displayMode: 'wireframe', doubleSided: true },
       storage,
     );
     expect(storage.getItem(VIEWER3D_PREFERENCES_KEY)).toContain('dancing-hall');
@@ -42,6 +43,7 @@ describe('viewer3d preferences (Serpent-qvc6 / 3D-09/3D-10 persistence)', () => 
       presetId: 'dancing-hall',
       lightIntensity: 1.7,
       displayMode: 'wireframe',
+      doubleSided: true,
     });
   });
 
@@ -64,6 +66,7 @@ describe('viewer3d preferences (Serpent-qvc6 / 3D-09/3D-10 persistence)', () => 
       presetId: DEFAULT_HDRI_PRESET_ID,
       lightIntensity: LIGHT_INTENSITY_MAX,
       displayMode: 'pbr',
+      doubleSided: false,
     });
     expect(
       parseViewer3dPreferences({ presetId: 'custom', lightIntensity: Number.NaN }),
@@ -71,13 +74,14 @@ describe('viewer3d preferences (Serpent-qvc6 / 3D-09/3D-10 persistence)', () => 
       presetId: DEFAULT_HDRI_PRESET_ID,
       lightIntensity: DEFAULT_LIGHT_INTENSITY,
       displayMode: 'pbr',
+      doubleSided: false,
     });
   });
 
   it('clamps light intensity on save', () => {
     const storage = memoryStorage();
     saveViewer3dPreferences(
-      { presetId: 'ferndale-studio-03', lightIntensity: 1000, displayMode: 'pbr' },
+      { presetId: 'ferndale-studio-03', lightIntensity: 1000, displayMode: 'pbr', doubleSided: false },
       storage,
     );
     expect(loadViewer3dPreferences(storage).lightIntensity).toBe(LIGHT_INTENSITY_MAX);
@@ -96,6 +100,7 @@ describe('viewer3d preferences (Serpent-qvc6 / 3D-09/3D-10 persistence)', () => 
       presetId: 'dancing-hall',
       lightIntensity: 2.5,
       displayMode: 'pbr',
+      doubleSided: false,
     });
   });
 });
