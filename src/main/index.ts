@@ -4376,9 +4376,6 @@ function criticalRendererCopy(
   count: number,
   english: boolean,
 ): { heading: string; message: string; detail: string } {
-  const confirmationPolicy = english
-    ? 'This confirmation is required every time; it cannot be remembered or bypassed by MCP permissions.'
-    : '每次操作都必须确认；不能记住此决定，也不能通过 MCP 权限绕过。';
   switch (operation) {
     case 'folder':
       return {
@@ -4387,8 +4384,8 @@ function criticalRendererCopy(
           ? 'The selected folder and its managed assets will be permanently deleted.'
           : '选定文件夹及其中的托管资产将被永久删除。',
         detail: english
-          ? `This cannot be undone and the files will not go to the application trash. ${confirmationPolicy}`
-          : `此操作无法撤销，文件不会进入应用回收站。${confirmationPolicy}`,
+          ? 'This cannot be undone and the files will not go to the application trash.'
+          : '此操作无法撤销，文件不会进入应用回收站。',
       };
     case 'linked-folder':
       return {
@@ -4397,8 +4394,8 @@ function criticalRendererCopy(
           ? 'The selected linked-folder source files will be permanently deleted.'
           : '选定链接文件夹中的源文件将被永久删除。',
         detail: english
-          ? `This cannot be undone and the files will not go to the application trash. ${confirmationPolicy}`
-          : `此操作无法撤销，文件不会进入应用回收站。${confirmationPolicy}`,
+          ? 'This cannot be undone and the files will not go to the application trash.'
+          : '此操作无法撤销，文件不会进入应用回收站。',
       };
     case 'linked-asset':
       return {
@@ -4407,8 +4404,8 @@ function criticalRendererCopy(
           ? `The source files of ${count} selected linked asset(s) will be permanently deleted, and their library link records with them.`
           : `选定 ${count} 个链接资产的源文件将被永久删除，库内的链接记录也会一并移除。`,
         detail: english
-          ? `This cannot be undone; the source files are deleted from the linked folder and do not go to the recycle bin. ${confirmationPolicy}`
-          : `此操作无法撤销：链接文件夹中的源文件会被直接删除，不会进入系统回收站。${confirmationPolicy}`,
+          ? 'This cannot be undone; the source files are deleted from the linked folder and do not go to the recycle bin.'
+          : '此操作无法撤销：链接文件夹中的源文件会被直接删除，不会进入系统回收站。',
       };
     case 'asset-permanent':
       return {
@@ -4417,8 +4414,8 @@ function criticalRendererCopy(
           ? `${count} selected trash asset(s) will be permanently deleted.`
           : `选定的 ${count} 项回收站资产将被永久删除。`,
         detail: english
-          ? `This cannot be undone and the files will not go to the application trash. ${confirmationPolicy}`
-          : `此操作无法撤销，文件不会进入应用回收站。${confirmationPolicy}`,
+          ? 'This cannot be undone and the files will not go to the application trash.'
+          : '此操作无法撤销，文件不会进入应用回收站。',
       };
     case 'trash-purge':
       return {
@@ -4427,8 +4424,8 @@ function criticalRendererCopy(
           ? 'All assets currently in the Serpent trash will be permanently deleted.'
           : 'Serpent 回收站中的全部资产将被永久删除。',
         detail: english
-          ? `This cannot be undone and the files will not go to the application trash. ${confirmationPolicy}`
-          : `此操作无法撤销，文件不会进入应用回收站。${confirmationPolicy}`,
+          ? 'This cannot be undone and the files will not go to the application trash.'
+          : '此操作无法撤销，文件不会进入应用回收站。',
       };
     case 'asset':
       return {
@@ -4437,8 +4434,8 @@ function criticalRendererCopy(
           ? `${count} selected asset(s) will be permanently deleted.`
           : `选定的 ${count} 项资产将被永久删除。`,
         detail: english
-          ? `This cannot be undone and the files will not go to the application trash. ${confirmationPolicy}`
-          : `此操作无法撤销，文件不会进入应用回收站。${confirmationPolicy}`,
+          ? 'This cannot be undone and the files will not go to the application trash.'
+          : '此操作无法撤销，文件不会进入应用回收站。',
       };
   }
 }
