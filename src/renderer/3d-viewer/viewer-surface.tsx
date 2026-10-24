@@ -104,16 +104,16 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<ViewPhase>('loading');
   const [viewError, setViewError] = useState<ViewError | null>(null);
-  const [stats, setStats] = useState<ModelStats | null>(null);
-  const [statsVisible, setStatsVisible] = useState(false);
-  const [warnings, setWarnings] = useState<ModelRenderWarning[]>([]);
-  const [notices, setNotices] = useState<string[]>([]);
-  const [loadEpoch, setLoadEpoch] = useState(0);
   const [preferences, setPreferences] = useState(() =>
     loadViewer3dPreferences(
       typeof window !== 'undefined' ? window.localStorage : undefined,
     ),
   );
+  const [stats, setStats] = useState<ModelStats | null>(null);
+  const [statsVisible, setStatsVisible] = useState(preferences.statsVisible === true);
+  const [warnings, setWarnings] = useState<ModelRenderWarning[]>([]);
+  const [notices, setNotices] = useState<string[]>([]);
+  const [loadEpoch, setLoadEpoch] = useState(0);
 
   // Effect-owned handles (refs, not state — no re-renders).
   const composerRef = useRef<SceneComposer | null>(null);
@@ -183,6 +183,12 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
     },
     [persistPreferences, preferences],
   );
+
+  const handleToggleStats = useCallback(() => {
+    const next = !statsVisible;
+    setStatsVisible(next);
+    persistPreferences({ ...preferences, statsVisible: next });
+  }, [persistPreferences, preferences, statsVisible]);
 
   /** Read the effective app background from the theme tokens (3D-06). */
   const applyThemeBackground = useCallback(() => {
@@ -609,7 +615,7 @@ export function ModelViewerSurface(props: ModelViewerSurfaceProps) {
             onFullscreen={props.onFullscreen}
             onPresetChange={handlePresetChange}
             onResetView={resetView}
-            onToggleStats={() => setStatsVisible((visible) => !visible)}
+            onToggleStats={handleToggleStats}
             presetId={presetId}
             statsVisible={statsVisible}
           />

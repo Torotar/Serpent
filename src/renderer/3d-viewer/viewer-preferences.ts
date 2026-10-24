@@ -1,10 +1,9 @@
 /**
  * Persisted 3D viewer preferences (toolbar state, spec 3D-09 / 3D-10).
  *
- * Only the HDRI preset id and the environment light intensity survive
- * restarts; both are validated on read through the slice-D parsers (unknown
- * ids / non-finite values fall back to the defaults). Storage is injected so
- * tests can use a plain object.
+ * The HDRI preset, environment light, display mode, double-sided drawing,
+ * and the model info overlay survive restarts. Values are validated on read.
+ * Storage is injected so tests can use a plain object.
  */
 
 import {
@@ -33,6 +32,8 @@ export interface Viewer3dPreferences {
   displayMode: ModelDisplayMode;
   /** Draw both faces. Off leaves each material's own side unchanged. */
   doubleSided: boolean;
+  /** Model info overlay. Closed until the user opens it. */
+  statsVisible: boolean;
 }
 
 export const DEFAULT_VIEWER3D_PREFERENCES: Viewer3dPreferences = {
@@ -40,6 +41,7 @@ export const DEFAULT_VIEWER3D_PREFERENCES: Viewer3dPreferences = {
   lightIntensity: DEFAULT_LIGHT_INTENSITY,
   displayMode: DEFAULT_DISPLAY_MODE,
   doubleSided: false,
+  statsVisible: false,
 };
 
 export interface Viewer3dPreferencesStorage {
@@ -63,6 +65,7 @@ export function parseViewer3dPreferences(input: unknown): Viewer3dPreferences {
       ? (candidate.displayMode as ModelDisplayMode)
       : DEFAULT_DISPLAY_MODE,
     doubleSided: candidate.doubleSided === true,
+    statsVisible: candidate.statsVisible === true,
   };
 }
 
@@ -91,6 +94,7 @@ export function saveViewer3dPreferences(
       lightIntensity: clampLightIntensity(preferences.lightIntensity),
       displayMode: preferences.displayMode,
       doubleSided: preferences.doubleSided === true,
+      statsVisible: preferences.statsVisible === true,
     }),
   );
 }
