@@ -501,6 +501,9 @@ export const thumbnailEventSchema = z.discriminatedUnion('type', [
     width: z.number().int().positive(),
     height: z.number().int().positive(),
     durationMs: z.number().int().nonnegative().optional(),
+    revisionId: nonBlankString.optional(),
+    previewKind: z.enum(['source']).nullable().optional(),
+    previewRevisionId: nonBlankString.nullable().optional(),
   }),
   z.strictObject({
     type: z.literal('asset.derived.ready'),

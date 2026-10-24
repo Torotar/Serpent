@@ -1697,6 +1697,7 @@ function AppInner() {
     fetchScopeAssetIds: fetchBrowseScopeAssetIds,
     removeLocally: removeLocallyFromBrowse,
     applyGeometryPatches: applyBrowseGeometryPatches,
+    applyPreviewPatches: applyBrowsePreviewPatches,
     reset: resetBrowsePagination,
   } = browsePagination;
   function resetBrowsePaginationPreservingVisibleLayout() {
@@ -1708,6 +1709,8 @@ function AppInner() {
   }
   const applyBrowseGeometryPatchesRef = useRef(applyBrowseGeometryPatches);
   applyBrowseGeometryPatchesRef.current = applyBrowseGeometryPatches;
+  const applyBrowsePreviewPatchesRef = useRef(applyBrowsePreviewPatches);
+  applyBrowsePreviewPatchesRef.current = applyBrowsePreviewPatches;
 
   const {
     multiEdit,
@@ -5178,6 +5181,10 @@ function AppInner() {
       if (batch.size > 0) {
         setAssets((current) => applyAssetThumbnailPatches(current, batch));
         const geometryPatches = new Map<string, { width: number; height: number }>();
+        const previewPatches = new Map<string, {
+          previewKind: 'source' | null;
+          previewRevisionId: string | null;
+        }>();
         for (const [assetId, patch] of batch) {
           if (
             typeof patch.width === "number" &&
@@ -5190,9 +5197,21 @@ function AppInner() {
               height: patch.height,
             });
           }
+          if (
+            patch.previewKind !== undefined
+            && patch.previewRevisionId !== undefined
+          ) {
+            previewPatches.set(assetId, {
+              previewKind: patch.previewKind,
+              previewRevisionId: patch.previewRevisionId,
+            });
+          }
         }
         if (geometryPatches.size > 0) {
           applyBrowseGeometryPatchesRef.current(geometryPatches);
+        }
+        if (previewPatches.size > 0) {
+          applyBrowsePreviewPatchesRef.current(previewPatches);
         }
       }
       if (pendingLayoutArtifactIds.size > 0) {
@@ -5252,10 +5271,24 @@ function AppInner() {
       const subscriptions = thumbnailSubscriptions();
       if (event.type === "asset.dimensions.ready") {
         if (!shouldProjectThumbnailCompletion(event.assetId, subscriptions)) return;
+        const currentAsset = assetsRef.current.find(
+          (asset) => asset.assetId === event.assetId,
+        );
+        if (
+          event.revisionId !== undefined
+          && currentAsset
+          && currentAsset.currentRevisionId !== event.revisionId
+        ) return;
         jobStatusCoordinatorRef.current?.noteActivity("media");
         queuePatch(event.assetId, {
           width: event.width,
           height: event.height,
+          ...(event.previewKind === undefined
+            ? {}
+            : { previewKind: event.previewKind }),
+          ...(event.previewRevisionId === undefined
+            ? {}
+            : { previewRevisionId: event.previewRevisionId }),
           ...(event.durationMs === undefined
             ? {}
             : { durationMs: event.durationMs }),
