@@ -1,5 +1,15 @@
 # 资产卡片信息间距与圆角调整
 
+## 顶部细线回归补充
+
+用户澄清为图片与选中轮廓之间的细线，且同一行部分卡片有、部分没有。平铺整数宽度分配会让方图进入相差 1px 的矩形；`object-fit: contain` 产生半像素上下留白，随取整宽度和图片边缘颜色呈现不同强度。先前对选中 outline 的怀疑经逐像素对照未得到支持，候选改动已撤回。
+
+复用既有平铺 slot 几何与源图比例，仅在横纵误差都不超过 1px 时发布 `--justified-thumbnail-fit: fill`。图片保留全部源像素，允许这一级取整造成的微小比例变化；真正的比例差异和未知比例仍用 contain。选中轮廓、卡片尺寸与 caption 不变。
+
+- `node scripts/run-vitest-with-electron.mjs run tests/unit/virtual-browse-canvas.test.ts`：11 项通过，覆盖窄/等宽/宽 1px 的方图及真实比例差异。
+- 隐藏 Electron 使用完整项目 CSS、隔离 userData、193×194 框与带顶部标记的方形 fixture，比较 contain/fill 的首行像素。顶部标记红色通道从 242 恢复为 255，computed object-fit 分别为 contain/fill，断言通过。探针和隔离数据在运行后清理。
+- 实际用户窗口仍待复验；packaged、macOS 未执行。
+
 ## 用户反馈与原因
 
 卡片信息区的上下留白偏大，尤其底部。关闭全部信息字段后，当前 islands 布局仍把预览层的底角设为直角，导致只有图片的卡片底部发方。

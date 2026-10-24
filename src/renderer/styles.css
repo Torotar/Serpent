@@ -16481,7 +16481,7 @@ html.serpent-window-square .window-edge-resize-layer.is-disabled {
 /* Preserve every source edge when integer slot rounding or the minimum aspect
    clamp gives the slot a slightly different ratio from the source image. */
 .app-shell[data-shell-layout="islands"] .justified-card-slot .asset-card .asset-thumbnail {
-  object-fit: contain;
+  object-fit: var(--justified-thumbnail-fit, contain);
 }
 .app-shell[data-shell-layout="islands"] .justified-card-slot .asset-caption,
 .app-shell[data-shell-layout="islands"] .masonry-card-slot .asset-caption {
