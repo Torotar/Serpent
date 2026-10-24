@@ -18629,7 +18629,8 @@ body.platform-darwin .app-shell[data-shell-layout="islands"] .toolbar-nav-cluste
 }
 
 /* ==== a87: gallery captions ================================================
-   The image owns the surface and selection outline. Metadata sits on the
+   The image owns the surface; the whole card owns the selection outline.
+   Metadata sits on the
    canvas below it, without a boxed footer. Caption metrics mirror the layout
    helpers so virtual rows reserve only the space occupied by visible text. */
 .app-shell[data-shell-layout="islands"] .asset-card,
@@ -18653,10 +18654,14 @@ body.platform-darwin .app-shell[data-shell-layout="islands"] .toolbar-nav-cluste
 .app-shell[data-shell-layout="islands"] .asset-card .asset-preview .asset-thumbnail {
   border-radius: inherit;
 }
-.app-shell[data-shell-layout="islands"] .asset-card.is-selected .asset-preview,
-.app-shell[data-shell-layout="islands"] .asset-card:focus-visible .asset-preview {
+.app-shell[data-shell-layout="islands"] .asset-card.is-selected,
+.app-shell[data-shell-layout="islands"] .asset-card:focus-visible,
+.app-shell[data-shell-layout="islands"] .asset-card.is-selected:hover,
+.app-shell[data-shell-layout="islands"] .asset-card.is-selected:focus-visible,
+.app-shell[data-shell-layout="islands"] .asset-card.is-selected:hover:focus-visible {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: 0;
 }
 .app-shell[data-shell-layout="islands"] .justified-card-slot .asset-caption,
 .app-shell[data-shell-layout="islands"] .masonry-card-slot .asset-caption,

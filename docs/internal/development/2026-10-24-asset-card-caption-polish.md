@@ -21,6 +21,12 @@
 
 ## 验证与限制
 
+### 选中高亮回归
+
+用户在提交后报告选中高亮丢失。此前将整卡选择轮廓移动到图片内部，同时清空整卡背景，削弱了选中反馈。已恢复整卡 2px accent 外轮廓和选中背景，并覆盖 hover、键盘焦点组合。轮廓不占布局空间，保留 caption 高度与圆角修复。
+
+`npx electron tmp/selection-probe.cjs`：隐藏 Electron 在 elevation 0/1 两种状态下验证整卡选中轮廓为 2px solid、布局边框宽为零，通过。使用隔离 userData，运行后清理探针和其数据目录。真实窗口高亮效果待用户复验。
+
 - `node scripts/run-vitest-with-electron.mjs run --config vitest.config.ts tests/unit/asset-caption-band.test.ts tests/unit/justified-caption-band.test.ts tests/unit/canvas-asset-layout.test.ts`：3 个文件、26 项通过。
 - `npx eslint src/renderer/asset-caption-band.ts src/renderer/canvas-asset-layout.ts src/renderer/justified-caption-band.ts tests/unit/asset-caption-band.test.ts tests/unit/justified-caption-band.test.ts`：通过。
 - `npm run typecheck`：通过。
