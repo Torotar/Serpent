@@ -43,6 +43,7 @@ export function ModelViewerToolbar(props: ModelViewerToolbarProps) {
   const [pickerRect, setPickerRect] = useState<{
     bottom: number;
     right: number;
+    maxHeight: number;
     inModal: boolean;
   } | null>(null);
   const hdriPickerRef = useRef<HTMLDivElement>(null);
@@ -57,9 +58,13 @@ export function ModelViewerToolbar(props: ModelViewerToolbarProps) {
     const update = () => {
       const rect = hdriTriggerRef.current?.getBoundingClientRect();
       if (!rect) return;
+      const menuWidth = Math.min(300, Math.max(0, window.innerWidth - 16));
+      const maxRight = Math.max(8, window.innerWidth - menuWidth - 8);
+      const right = Math.min(Math.max(8, window.innerWidth - rect.right), maxRight);
       setPickerRect({
         bottom: window.innerHeight - rect.top + 8,
-        right: window.innerWidth - rect.right,
+        right,
+        maxHeight: Math.max(0, rect.top - 16),
         inModal: hdriTriggerRef.current?.closest('[role="dialog"]') != null,
       });
     };
@@ -107,6 +112,7 @@ export function ModelViewerToolbar(props: ModelViewerToolbarProps) {
             style={{
               bottom: pickerRect.bottom,
               right: pickerRect.right,
+              maxHeight: pickerRect.maxHeight,
             }}
           >
             {HDRI_PRESETS.map((preset) => {

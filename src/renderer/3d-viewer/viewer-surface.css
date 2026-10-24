@@ -301,6 +301,7 @@
   position: fixed;
   left: auto;
   z-index: var(--ui-layer-menu);
+  overflow-y: auto;
 }
 .model-viewer-hdri-option {
   display: flex;

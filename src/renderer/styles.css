@@ -6094,6 +6094,18 @@ body.serpent-modal-open .app-shell {
   color: var(--secondary);
 }
 
+.font-viewer-menu {
+  display: inline-flex;
+  align-items: center;
+}
+
+.preview-zoom-controls.font-viewer-controls .font-viewer-menu-trigger {
+  height: 24px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  line-height: 24px;
+}
+
 .font-viewer-control-value {
   min-width: 2.2em;
   text-align: right;
