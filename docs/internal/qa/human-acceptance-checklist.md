@@ -39,6 +39,18 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | DROPDOWN-UI-01 | 打开的下拉列表使用同一套菜单颜色 | 人类验收通过 | ① 深色主题下打开图片，展开色彩空间。② 打开模型，展开显示模式，看「网格灰模」这类较长名称。③ 打开 AI 设置，展开接口格式，并和上下的输入框比一下。④ 再各打开一处：筛选「更多」里的喜欢过滤、插件安装范围、移动或恢复对话框里的列表。 | 打开的列表背景、文字、悬停和当前项颜色一致，文字左对齐。关闭时名称也左对齐，并完整留在框内，不折到描边外面。和输入框放在一起的下拉，边框、圆角、高度与旁边的输入框相同。工具栏上的显示模式仍是和旁边按钮一样的小框。 | `src/renderer/ui/primitives/Select.tsx` / `src/renderer/ui/ui.css` / `tests/unit/standard-select.test.ts` | 2026-10-25 用户确认验收通过。展开层一律是 `ui-menu-surface`。packaged 与 macOS 未执行。 |
 
+## 2026-10-24 链接文件强制删除快捷键
+
+| ID | 功能 | 状态 | 可操作检查 | 预期 | 实现与自动化证据 | 结果/反馈 |
+| --- | --- | --- | --- | --- | --- | --- |
+| LINKED-FILE-DELETE-SHORTCUT-01 / `Serpent-3d5f76` | 链接文件可用键盘快捷键强制删除，菜单显示相同快捷键 | 待人类验收 | 打开包含链接文件的文件夹，选中一个链接文件；检查右键菜单里的快捷键，再按该快捷键并确认删除。多选托管文件与链接文件后重复检查。 | Windows 显示并响应 Shift+Delete；macOS 显示并响应 ⌥⌘Delete；确认后只删除所选链接文件的源文件及对应资产记录。 | `src/renderer/App.tsx` / `src/renderer/browse-key-command.ts` / `src/renderer/commands/asset-shortcuts.ts` / `tests/unit/browse-command-keyboard.test.ts` / `tests/unit/asset-multi-commands.test.ts` / `tests/e2e/linked-folders.test.ts` | 自动化证据见开发日志与 QA 报告；真实 Computer Use 与 macOS 未执行，等待用户验收。 |
+
+## 2026-10-24 确认弹窗文案清理
+
+| ID | 功能 | 状态 | 可操作检查 | 预期 | 实现与自动化证据 | 结果/反馈 |
+| --- | --- | --- | --- | --- | --- | --- |
+| CONFIRM-COPY-01 / `Serpent-4d3b0e` | 删除确认只说明删除范围、文件去向和可恢复性；权限设置说明实际操作范围 | 待人类验收 | 在临时资源库中分别打开“从磁盘删除资源库”和“强制删除链接资产”确认窗后取消；在设置中打开 MCP 客户端完全权限确认窗后取消。 | 文案清楚说明会删除什么、关联源目录是否受影响、文件是否进入回收站；不出现重复强调逐次确认、不能记住决定、MCP 不能绕过等策略说明。完全权限确认准确说明可直接执行的操作和危险操作仍需 Agent 确认。 | `src/main/index.ts` / `src/renderer/i18n/catalogs/zh-CN.ts` / `src/renderer/i18n/catalogs/en.ts` / `tests/e2e/critical-confirmation.test.ts` / `tests/e2e/linked-folders.test.ts` | Windows Electron 对相关确认窗进行文案断言；真实用户操作与 macOS 未执行，等待验收。 |
+
 本轮最终 20k 基准刷新因 Windows 创建临时库失败并留下无法访问的测试目录而未完成，`verify:mainline` 也因此停在 lint；旧版基准数据不作为最终状态通过证据。请先释放并清理该临时目录，再补跑性能与总门禁，功能验收已通过，但最终性能基准与完整门禁仍待补跑。
 
 复验操作：打开含小型 PNG 与模型文件的资源库并进入对应文件夹；确认小 PNG 卡片直接显示原图且无需等待 thumbnail job，模型卡片在可见波结束后出现已解码预览。随后保持应用空闲并观察后台队列继续领取已排队任务、排队数下降；切换到另一处含缺失预览的文件夹，确认新可见资产先完成且后台工作随后接续。记录实际排队/运行计数及等待时长；若队列仍停滞或卡片未解码，保持人类验收不通过并附诊断信息。

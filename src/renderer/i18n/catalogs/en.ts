@@ -1809,7 +1809,7 @@ export const en = {
     mcpAutoStart: "Start MCP automatically",
     mcpAutoStartHint: "Start the loopback server when Serpent opens.",
     mcpPermissionsTitle: "MCP permissions",
-    mcpPermissionsHint: "Auto runs routine and recoverable work without prompts. Dangerous operations always require the Agent's exact second-step confirmation; Full Access does not bypass that boundary.",
+    mcpPermissionsHint: "Choose which operations each client can run directly.",
     mcpPermissionClientHint: "This mode persists across app restarts and applies only to this client connection.",
     mcpAccessMode: "Access mode",
     mcpAccessModeAuto: "Auto",

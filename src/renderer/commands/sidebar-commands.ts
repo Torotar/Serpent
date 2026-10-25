@@ -10,6 +10,7 @@ import {
 } from '../../shared/linked-folder-tree';
 import { translateForLocale } from '../i18n';
 import type { CommandContext, CommandDefinition } from './command-types';
+import { DELETE_FROM_DISK_SHORTCUT } from './asset-shortcuts';
 
 function revealFolderId(ctx: SidebarCommandContext): string {
   if (ctx.locationKind === 'linked') {
@@ -277,15 +278,7 @@ export const sidebarCommandDefinitions: readonly SidebarCommandDefinition[] = [
           : 'command.folder.deleteFromDisk',
       ),
     group: 'delete',
-    shortcut: {
-      mac: {
-        label: '⌥⌘Delete',
-        key: 'Delete',
-        metaKey: true,
-        altKey: true,
-      },
-      windows: { label: 'Shift+Delete', key: 'Delete', shiftKey: true },
-    },
+    shortcut: DELETE_FROM_DISK_SHORTCUT,
     visible: (ctx) =>
       ctx.menuKind === 'folder' &&
       !ctx.isLibraryRoot &&

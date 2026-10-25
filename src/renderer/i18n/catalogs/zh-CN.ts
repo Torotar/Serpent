@@ -1790,7 +1790,7 @@ export const zhCN = {
     mcpAutoStart: "自动启动 MCP",
     mcpAutoStartHint: "Serpent 打开后自动启动本机回环服务。",
     mcpPermissionsTitle: "MCP 权限",
-    mcpPermissionsHint: "Auto 模式对普通和可恢复操作不弹提示；危险操作始终需要 Agent 的精确二次确认，Full Access 也不能绕过这条边界。",
+    mcpPermissionsHint: "为每个客户端设置可以直接执行的操作范围。",
     mcpPermissionClientHint: "模式会跨应用重启保留，仅作用于这个客户端连接。",
     mcpAccessMode: "访问模式",
     mcpAccessModeAuto: "自动",

@@ -68,6 +68,7 @@ import { ConvertLinkedDialog } from "./ConvertLinkedDialog";
 import { LinkedRulesDialog } from "./LinkedRulesDialog";
 import { TagManagementWorkspace } from "./TagManagementWorkspace";
 import { useFolderDeleteActions } from "./use-folder-delete-actions";
+import { canDeleteAssetFromDiskWithShortcut } from "./browse-key-command";
 import { useFolderOrganizeActions } from "./use-folder-organize-actions";
 import { useFolderCommandShortcuts } from "./use-folder-command-shortcuts";
 import { SearchHistoryPopover } from "./SearchHistoryPopover";
@@ -3962,7 +3963,7 @@ function AppInner() {
     return {
       assetIds: report.trash.processAssetIds.filter((assetId) => {
         const asset = visibleById.get(assetId);
-        return !asset || asset.locationKind === "managed";
+        return canDeleteAssetFromDiskWithShortcut(asset);
       }),
       folderIds: [...report.trash.processFolderIds],
     };
