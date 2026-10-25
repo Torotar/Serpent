@@ -9,6 +9,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createShellPortal } from '../ui/ShellStyleScope';
+import { Select } from '../ui/primitives/Select';
 import { useLocale } from '../i18n';
 import { isImeKeyboardEvent } from '../ime-safe-dismiss';
 import { Icon } from '../Icons';
@@ -166,24 +167,21 @@ export function ModelViewerToolbar(props: ModelViewerToolbarProps) {
         </button>
         {hdriPicker}
       </div>
-      <label className="model-viewer-toolbar-item is-display-mode">
+      <div className="model-viewer-toolbar-item is-display-mode">
         <span className="model-viewer-toolbar-label">{t('viewer3d.displayMode')}</span>
-        <select
+        <Select
+          appearance="inline"
           aria-label={t('viewer3d.displayMode')}
-          value={props.displayMode}
-          onChange={(event) => {
-            const value = event.currentTarget.value as ModelDisplayMode;
-            if (value !== props.displayMode) props.onDisplayModeChange(value);
+          onValueChange={(value) => {
+            if (value !== props.displayMode) props.onDisplayModeChange(value as ModelDisplayMode);
           }}
-          tabIndex={0}
-        >
-          {MODEL_DISPLAY_MODES.map((mode) => (
-            <option key={mode} value={mode}>
-              {t(`viewer3d.displayModes.${mode}`)}
-            </option>
-          ))}
-        </select>
-      </label>
+          options={MODEL_DISPLAY_MODES.map((mode) => ({
+            value: mode,
+            label: t(`viewer3d.displayModes.${mode}`),
+          }))}
+          value={props.displayMode}
+        />
+      </div>
       <button
         aria-label={t('viewer3d.doubleSided')}
         aria-pressed={props.doubleSided}

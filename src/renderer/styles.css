@@ -6292,28 +6292,39 @@ body.serpent-modal-open .app-shell {
 }
 .preview-color-space-control {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   color: var(--secondary);
   font-size: calc(11px * var(--ui-font-scale));
   white-space: nowrap;
 }
-.preview-color-space-control select {
+.preview-color-space-control .ui-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.preview-color-space-control .ui-select-trigger {
+  width: max-content;
   max-width: min(220px, 28vw);
-  padding: 2px 3px;
+  padding: 0 18px 0 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-ui);
+  font-size: inherit;
+  font-weight: 400;
   cursor: pointer;
+}
+.preview-color-space-control .ui-select::after {
+  right: 2px;
 }
 .preview-color-space-control:focus-within {
   border-radius: calc(4px * var(--ui-radius-scale, 1));
   box-shadow: 0 0 0 2px var(--accent);
 }
 .preview-zoom-controls .preview-zoom-label,
-.preview-zoom-controls button {
+.preview-zoom-controls button:not(.ui-select-trigger) {
   min-width: 0;
   padding: 3px 7px;
   border: 0;
@@ -6325,7 +6336,7 @@ body.serpent-modal-open .app-shell {
   cursor: pointer;
   white-space: nowrap;
 }
-.preview-zoom-controls button {
+.preview-zoom-controls button:not(.ui-select-trigger) {
   display: grid;
   width: 28px;
   height: 24px;
@@ -6336,8 +6347,8 @@ body.serpent-modal-open .app-shell {
   color: var(--secondary);
   font-variant-numeric: tabular-nums;
 }
-.preview-zoom-controls button:hover,
-.preview-zoom-controls button:focus-visible {
+.preview-zoom-controls button:not(.ui-select-trigger):hover,
+.preview-zoom-controls button:not(.ui-select-trigger):focus-visible {
   background: var(--hover);
   color: var(--text);
 }
@@ -6645,7 +6656,7 @@ body.serpent-modal-open .app-shell {
   font-size: calc(11px * var(--ui-font-scale));
   backdrop-filter: blur(10px);
 }
-.preview-exr-plane-selector select {
+.preview-exr-plane-selector .ui-select-trigger {
   max-width: min(260px, 45vw);
   border: 0;
   outline: 0;
@@ -9935,14 +9946,6 @@ select.ai-config-input.ai-config-languages {
 .settings-number-input,
 .settings-select {
   min-width: 112px;
-  height: 32px;
-  padding: 0 9px;
-  border: 1px solid var(--divider);
-  border-radius: calc(6px * var(--ui-radius-scale, 1));
-  background: var(--pane);
-  color: var(--text);
-  font: inherit;
-  font-size: calc(12px * var(--ui-font-scale));
 }
 
 .settings-error-message,
@@ -14096,7 +14099,8 @@ select.ai-config-input.ai-config-languages {
   color: var(--secondary);
   font-size: calc(11px * var(--ui-font-scale));
 }
-.decision-field select {
+.decision-field select,
+.decision-field .ui-select-trigger {
   /* Serpent-4ojz / Serpent-p1rm: shell rhythm + de-native chrome (no OS
      select bevel/arrow; custom chevron via theme tertiary stroke). */
   appearance: none;
@@ -14118,15 +14122,21 @@ select.ai-config-input.ai-config-languages {
     border-color 120ms ease,
     box-shadow 120ms ease;
 }
-.decision-field select:hover {
+.decision-field select:hover,
+.decision-field .ui-select-trigger:hover {
   border-color: color-mix(in srgb, var(--text) 16%, var(--divider));
 }
-.decision-field select:focus {
+.decision-field select:focus,
+.decision-field .ui-select-trigger:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--divider));
   box-shadow: 0 0 0 3px var(--accent-soft);
   outline: 0;
 }
-[data-theme="light"] .decision-field select {
+.decision-field .ui-select::after {
+  content: none;
+}
+[data-theme="light"] .decision-field select,
+[data-theme="light"] .decision-field .ui-select-trigger {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 12 12'%3E%3Cpath stroke='%238a8f8a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
 }
 .conflict-examples {
@@ -16016,15 +16026,15 @@ html.serpent-window-square .window-edge-resize-layer.is-disabled {
   color: var(--text);
 }
 
-.preview-zoom-controls button {
+.preview-zoom-controls button:not(.ui-select-trigger) {
   width: 28px;
   height: 26px;
   border-radius: var(--ui-radius-control);
   color: var(--secondary);
 }
 
-.preview-zoom-controls button:hover,
-.preview-zoom-controls button:focus-visible {
+.preview-zoom-controls button:not(.ui-select-trigger):hover,
+.preview-zoom-controls button:not(.ui-select-trigger):focus-visible {
   background: var(--hover);
   color: var(--text);
 }

@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type RefObject,
   type SyntheticEvent,
 } from "react";
@@ -29,6 +28,7 @@ import {
 } from "./preview-poll";
 import { waitForMediaArtifactRetry } from "./media-retry";
 import { Icon } from "./Icons";
+import { Select } from "./ui/primitives";
 import type { ViewerChromeActivitySource } from "./viewer-chrome-idle";
 import {
   INITIAL_VIEWER_DRAWER_STATE,
@@ -745,8 +745,8 @@ const AssetPreviewModalContent = forwardRef<
     }
   }
 
-  function selectExrPlane(event: ChangeEvent<HTMLSelectElement>) {
-    const plane = Number(event.currentTarget.value);
+  function selectExrPlane(value: string) {
+    const plane = Number(value);
     if (!Number.isSafeInteger(plane) || plane < 0) return;
     setSelectedExrPlane(plane);
     void resolvePreview(false, "client", plane);
@@ -1546,18 +1546,16 @@ const AssetPreviewModalContent = forwardRef<
           {resolution?.exrPlanes && resolution.exrPlanes.length > 1 ? (
             <label className="preview-exr-plane-selector">
               <span>{t("preview.exrPlane")}</span>
-              <select
+              <Select
+                appearance="inline"
                 aria-label={t("preview.exrPlane")}
-                onChange={selectExrPlane}
-                tabIndex={VIEWER_CHROME_TAB_INDEX}
-                value={resolution.selectedExrPlane ?? selectedExrPlane}
-              >
-                {resolution.exrPlanes.map((plane) => (
-                  <option key={plane.index} value={plane.index}>
-                    {plane.label}
-                  </option>
-                ))}
-              </select>
+                onValueChange={selectExrPlane}
+                options={resolution.exrPlanes.map((plane) => ({
+                  value: String(plane.index),
+                  label: plane.label,
+                }))}
+                value={String(resolution.selectedExrPlane ?? selectedExrPlane)}
+              />
             </label>
           ) : null}
           <PluginViewerActionButtons
