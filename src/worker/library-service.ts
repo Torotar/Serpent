@@ -269,6 +269,11 @@ import {
   type BillfishAssetCandidate,
 } from './billfish-library';
 import {
+  PixcallLibraryReadError,
+  readPixcallLibrary,
+  type PixcallAssetCandidate,
+} from './pixcall-library';
+import {
   emptySyncAssetMetadata,
   hasSyncAiLayer,
   metadataContentHash,
@@ -727,6 +732,7 @@ import type {
   ExportProgressEvent,
   EagleImportResult,
   BillfishImportResult,
+  PixcallImportResult,
   ImportProgressEvent,
   DeleteProgressEvent,
 } from '../shared/protocol/responses';
@@ -4045,6 +4051,8 @@ interface BatchRelinkMatch {
 }
 
 interface ImportSourceEntry {
+  /** Hash verified source bytes as they are copied into staging. */
+  hashWhileCopy?: boolean;
   byteSize: number;
   destinationRelativePath: string;
   /** Metadata projected from an Eagle item; absent for ordinary imports. */
@@ -4082,6 +4090,7 @@ interface EagleCopiedThumbnail {
 }
 
 interface EagleImportedMetadata {
+  author?: string | null;
   collectionIds: string[];
   description: string | null;
   rating: number;
@@ -13182,9 +13191,13 @@ export class LibraryService {
         Number(openedStat.mode & 0o777n),
       );
       const buffer = Buffer.allocUnsafe(1024 * 1024);
+      const sha256 = entry.hashWhileCopy ? createHash('sha256') : undefined;
+      const fingerprint = entry.hashWhileCopy ? createHash('sha1') : undefined;
       for (;;) {
         const bytesRead = readSync(sourceFd, buffer, 0, buffer.length, null);
         if (bytesRead === 0) break;
+        sha256?.update(buffer.subarray(0, bytesRead));
+        fingerprint?.update(buffer.subarray(0, bytesRead));
         let written = 0;
         while (written < bytesRead) {
           written += writeSync(stageFd, buffer, written, bytesRead - written);
@@ -13202,6 +13215,10 @@ export class LibraryService {
       const byteSize = Number(stagedStat.size);
       if (!Number.isSafeInteger(byteSize)) {
         throw unsupportedSourceEntry('UNSUPPORTED_FILE_ENTRY');
+      }
+      if (sha256 && fingerprint) {
+        entry.sha256 = sha256.digest('hex');
+        entry.contentFingerprint = fingerprint.digest('hex');
       }
       return byteSize;
     } finally {
@@ -13640,13 +13657,14 @@ export class LibraryService {
       .prepare(
         `INSERT INTO asset_metadata
            (asset_id, description, rating, favorite, palette,
-            source_page_url, entity_version, updated_at)
-         VALUES (?, ?, ?, 0, NULL, ?, 1, ?)
+            source_page_url, author, entity_version, updated_at)
+         VALUES (?, ?, ?, 0, NULL, ?, ?, 1, ?)
          ON CONFLICT(asset_id) DO UPDATE SET
            description = excluded.description,
            rating = excluded.rating,
            favorite = excluded.favorite,
            source_page_url = excluded.source_page_url,
+           author = excluded.author,
            entity_version = asset_metadata.entity_version + 1,
            updated_at = excluded.updated_at`,
       )
@@ -13655,6 +13673,7 @@ export class LibraryService {
         metadata.description,
         metadata.rating,
         metadata.sourcePageUrl,
+        metadata.author ?? null,
         now,
       );
 
@@ -44318,6 +44337,96 @@ export class LibraryService {
     }
   }
 
+  private ensurePixcallTags(
+    openLibrary: OpenLibrary,
+    items: readonly PixcallAssetCandidate[],
+    tagIdsByName: Map<string, string>,
+  ): void {
+    const names = new Set(items.flatMap((item) => item.metadata?.tags ?? []));
+    const now = new Date().toISOString();
+    openLibrary.connection.transaction(() => {
+      for (const name of names) {
+        if (tagIdsByName.has(name)) continue;
+        const existing = openLibrary.connection
+          .prepare(
+            'SELECT tag_id FROM tags WHERE library_id = ? AND name = ? COLLATE NOCASE LIMIT 1',
+          )
+          .get(openLibrary.summary.libraryId, name) as { tag_id: string } | undefined;
+        if (existing) {
+          tagIdsByName.set(name, existing.tag_id);
+          continue;
+        }
+        const tagId = randomUUID();
+        openLibrary.connection
+          .prepare(
+            'INSERT OR IGNORE INTO tags (tag_id, library_id, name, created_at) VALUES (?, ?, ?, ?)',
+          )
+          .run(tagId, openLibrary.summary.libraryId, name, now);
+        const inserted = openLibrary.connection
+          .prepare(
+            'SELECT tag_id FROM tags WHERE library_id = ? AND name = ? COLLATE NOCASE LIMIT 1',
+          )
+          .get(openLibrary.summary.libraryId, name) as { tag_id: string } | undefined;
+        if (inserted) tagIdsByName.set(name, inserted.tag_id);
+      }
+    })();
+  }
+
+  private pixcallImportEntry(
+    sourceRootPath: string,
+    item: PixcallAssetCandidate,
+    tagIdsByName: ReadonlyMap<string, string>,
+  ): ImportSourceEntry | null {
+    try {
+      const resolvedSourcePath = path.resolve(item.sourcePath);
+      if (!pathIsWithin(sourceRootPath, resolvedSourcePath)) {
+        throw new PixcallLibraryReadError('Pixcall source escaped its library root.');
+      }
+      const sourceStat = lstatSync(resolvedSourcePath, { bigint: true });
+      if (
+        sourceStat.isSymbolicLink()
+        || !sourceStat.isFile()
+        || sourceStat.size > BigInt(Number.MAX_SAFE_INTEGER)
+      ) {
+        throw new PixcallLibraryReadError('Pixcall source is no longer a regular file.');
+      }
+      const destinationRelativePath = normalizeRelativeAssetPath(item.relativePath);
+      const metadata = item.metadata;
+      const tagIds = [...new Set(
+        (metadata?.tags ?? [])
+          .map((tag) => tagIdsByName.get(tag))
+          .filter((tagId): tagId is string => tagId !== undefined),
+      )];
+      return {
+        hashWhileCopy: true,
+        byteSize: Number(sourceStat.size),
+        destinationRelativePath,
+        eagleMetadata: metadata
+          ? {
+              author: metadata.author,
+              collectionIds: [],
+              description: metadata.description,
+              height: metadata.height,
+              rating: metadata.rating,
+              sourceModifiedAtMs: item.sourceModifiedAtMs,
+              sourcePageUrl: metadata.sourcePageUrl,
+              sourceRootPath,
+              tagIds,
+              thumbnailPath: null,
+              width: metadata.width,
+            }
+          : undefined,
+        sourceSnapshot: sourceSnapshot(sourceStat),
+        sourcePath: resolvedSourcePath,
+      };
+    } catch (error) {
+      this.diagnose('pixcall-import.item-skipped', error, {
+        relativePath: item.relativePath,
+      });
+      return null;
+    }
+  }
+
   private wrapEagleImportStageError(
     error: unknown,
     reason: 'IMPORT_COPY_FAILED' | 'IMPORT_REGISTER_FAILED',
@@ -44932,6 +45041,230 @@ export class LibraryService {
     } catch (error) {
       if (error instanceof LibraryServiceError && error.code === 'CANCELLED') throw error;
       emitBillfishProgress('failed');
+      throw error;
+    } finally {
+      this.activeImports.delete(importId);
+    }
+  }
+
+  async importPixcallLibrary(input: {
+    libraryId: string;
+    sourceRootPath: string;
+  }): Promise<PixcallImportResult> {
+    const openLibrary = this.requireOpenLibrary(input.libraryId);
+    this.assertLibraryWritable(openLibrary);
+    const importId = randomUUID();
+    const cancelState: TransferCancelState = { cancelled: false };
+    this.activeImports.set(importId, cancelState);
+    let totalFiles = 0;
+    let totalBytes = 0;
+    let filesProcessed = 0;
+    let bytesProcessed = 0;
+    const emitPixcallProgress = (
+      phase: ImportProgressEvent['phase'],
+      processedFiles = filesProcessed,
+      processedBytes = bytesProcessed,
+    ): void => {
+      this.emitProgress({
+        type: 'import.progress',
+        importId,
+        phase,
+        cancelable: true,
+        filesProcessed: processedFiles,
+        totalFiles,
+        bytesProcessed: processedBytes,
+        totalBytes,
+      });
+    };
+    const throwIfCancelled = (): void => {
+      if (!cancelState.cancelled) return;
+      emitPixcallProgress('cancelled');
+      throw new LibraryServiceError('CANCELLED');
+    };
+
+    emitPixcallProgress('validate', 0, 0);
+    let root: ReturnType<typeof readPixcallLibrary>;
+    try {
+      root = readPixcallLibrary(input.sourceRootPath);
+    } catch (error) {
+      this.activeImports.delete(importId);
+      emitPixcallProgress('failed');
+      throw new LibraryServiceError('INVALID_IMPORT_SOURCE', {
+        cause: error,
+        reason: error instanceof PixcallLibraryReadError && error.message.includes('exceeds the supported entry limit')
+          ? 'PIXCALL_ENTRY_LIMIT' : 'PIXCALL_METADATA_UNREADABLE',
+      });
+    }
+
+    const sourceRoot = realpathSync(root.sourceRootPath);
+    const destinationRoot = realpathSync(openLibrary.summary.libraryPath);
+    if (pathIsWithin(sourceRoot, destinationRoot) || pathIsWithin(destinationRoot, sourceRoot)) {
+      this.activeImports.delete(importId);
+      emitPixcallProgress('failed');
+      throw new LibraryServiceError('INVALID_IMPORT_SOURCE');
+    }
+
+    totalFiles = root.items.length;
+    totalBytes = root.items.reduce((total, item) => total + item.byteSize, 0);
+    const tagIdsByName = new Map<string, string>();
+    let importedCount = 0;
+    let skippedCount = root.skippedCount;
+    const skippedItems: Array<{ relativePath: string; reason: 'unreadable' | 'unsafe' | 'duplicate' | 'metadata-failed' }> = [...root.skippedItems];
+    let replacedCount = 0;
+    let invalidItemCount = root.skippedCount;
+    let metadataCount = 0;
+    const sampleAssets: AssetSummary[] = [];
+    // One source per transaction preserves the source-to-destination mapping
+    // when conflict resolution renames an imported file.
+    const batchSize = 1;
+    const destinationIndex = this.managedDestinationIndex(openLibrary);
+    let lastCopyProgressAt = 0;
+    const emitCopyProgress = (force = false): void => {
+      const now = Date.now();
+      if (!force && now - lastCopyProgressAt < 250) return;
+      lastCopyProgressAt = now;
+      emitPixcallProgress('copy');
+    };
+
+    try {
+      for (let offset = 0; offset < root.items.length; offset += batchSize) {
+        throwIfCancelled();
+        const items = root.items.slice(offset, offset + batchSize);
+        if (offset === 0) emitPixcallProgress('copy', 0, 0);
+        this.ensurePixcallTags(openLibrary, items, tagIdsByName);
+        const batch: ImportSourceEntry[] = [];
+        for (const item of items) {
+          const entry = this.pixcallImportEntry(root.sourceRootPath, item, tagIdsByName);
+          if (entry) {
+            batch.push(entry);
+          } else {
+            skippedCount += 1;
+            invalidItemCount += 1;
+            skippedItems.push({ relativePath: item.relativePath, reason: 'unreadable' });
+          }
+        }
+        const batchBytesBefore = bytesProcessed;
+        let batchBytesCopied = 0;
+        if (batch.length > 0) {
+          let plan: ImportConflictPlan;
+          try {
+            const prepared = this.prepareImport({
+              libraryId: input.libraryId,
+              sourceKind: 'files',
+              sourcePaths: batch.map((entry) => entry.sourcePath),
+              sourceEntries: batch,
+              sourceDirectories: [],
+              createImageSequence: false,
+              dedupeSameNameByContent: true,
+              skipLibraryDuplicateScan: true,
+              skipContentHash: false,
+              destinationIndex,
+              onStagedEntry: (batchProcessed, stagedBytes) => {
+                throwIfCancelled();
+                batchBytesCopied += stagedBytes;
+                filesProcessed = offset + batchProcessed;
+                bytesProcessed = batchBytesBefore + batchBytesCopied;
+                emitCopyProgress();
+              },
+              suppressAssetChangeEvents: true,
+            });
+            if (isImportSourceFailurePlan(prepared)) {
+              throw new LibraryServiceError('INVALID_IMPORT_SOURCE');
+            }
+            plan = prepared;
+          } catch (error) {
+            throw this.wrapEagleImportStageError(error, 'IMPORT_COPY_FAILED');
+          }
+          if (cancelState.cancelled) {
+            this.abandonImport(plan.importId);
+            throwIfCancelled();
+          }
+          let completion: ImportCompletion;
+          try {
+            completion = this.resolveImport({
+              importId: plan.importId,
+              suspectedDuplicate: 'skip',
+              nameConflict: 'keep-both',
+            });
+          } catch (error) {
+            throw this.wrapEagleImportStageError(error, 'IMPORT_REGISTER_FAILED');
+          }
+          if (completion.importedCount === 1 && completion.assets.length === 1 && items[0]?.metadata?.exif) {
+            const asset = completion.assets[0]!;
+            const current = openLibrary.connection.prepare('SELECT current_revision_id FROM assets WHERE asset_id = ?')
+              .get(asset.assetId) as { current_revision_id: string | null } | undefined;
+            if (current?.current_revision_id) {
+              const saved = await this.persistRawImageMetadata(openLibrary, asset.assetId, current.current_revision_id,
+                this.folderPath(openLibrary, asset.relativeFilePath), normalizeRawImageMetadata(items[0].metadata.exif),
+                { width: items[0].metadata.width, height: items[0].metadata.height });
+              if (!saved) skippedItems.push({ relativePath: items[0].relativePath, reason: 'metadata-failed' });
+            }
+          }
+          if (completion.importedCount === 1 && items[0]?.metadata) metadataCount += 1;
+          importedCount += completion.importedCount;
+          skippedCount += completion.skippedCount;
+          if (completion.skippedCount > 0) skippedItems.push({ relativePath: items[0]!.relativePath, reason: 'duplicate' });
+          replacedCount += completion.replacedCount;
+          this.suppressAutoAnalysisForAssets(
+            input.libraryId,
+            completion.assets.map((asset) => asset.assetId),
+          );
+          if (sampleAssets.length < 300) {
+            sampleAssets.push(...completion.assets.slice(0, 300 - sampleAssets.length));
+          }
+          if (completion.importedCount + completion.replacedCount > 0) {
+            this.options.onAssetsChanged?.({
+              type: 'asset.changed',
+              libraryId: input.libraryId,
+              changedCount: completion.importedCount + completion.replacedCount,
+              missingCount: 0,
+              source: 'client',
+            });
+          }
+        }
+        filesProcessed = Math.min(totalFiles, offset + items.length);
+        bytesProcessed = Math.min(
+          totalBytes,
+          batchBytesBefore + items.reduce((total, item) => total + item.byteSize, 0),
+        );
+        emitCopyProgress(filesProcessed === totalFiles);
+        await transferCheckpoint();
+        throwIfCancelled();
+      }
+      if (root.directories.length > 0) {
+        throwIfCancelled();
+        const plan = this.prepareImport({
+          libraryId: input.libraryId,
+          sourceKind: 'files',
+          sourcePaths: [],
+          sourceEntries: [],
+          sourceDirectories: root.directories,
+        });
+        if (isImportSourceFailurePlan(plan)) throw new LibraryServiceError('INVALID_IMPORT_SOURCE');
+        if (cancelState.cancelled) {
+          this.abandonImport(plan.importId);
+          throwIfCancelled();
+        }
+        this.resolveImport({ importId: plan.importId, suspectedDuplicate: 'skip', nameConflict: 'keep-both' });
+      }
+      emitPixcallProgress('complete', totalFiles, totalBytes);
+      return {
+        sourceDisplayName: root.displayName,
+        fileCount: root.items.length,
+        importedCount,
+        assetCount: importedCount,
+        skippedCount,
+        replacedCount,
+        collectionCount: 0,
+        tagCount: tagIdsByName.size,
+        invalidItemCount,
+        metadataCount,
+        skippedItems,
+        assets: sampleAssets,
+      };
+    } catch (error) {
+      if (error instanceof LibraryServiceError && error.code === 'CANCELLED') throw error;
+      emitPixcallProgress('failed');
       throw error;
     } finally {
       this.activeImports.delete(importId);
@@ -49140,7 +49473,9 @@ export class LibraryService {
       }
       return staged;
     }
-    const hashes = sha256AndContentFingerprintFileAtPath(input.stagedPath);
+    const hashes = input.entry.hashWhileCopy && input.entry.sha256 && input.entry.contentFingerprint
+      ? { sha256: input.entry.sha256, contentFingerprint: input.entry.contentFingerprint }
+      : sha256AndContentFingerprintFileAtPath(input.stagedPath);
     return {
       ...input.entry,
       byteSize,
