@@ -1,9 +1,9 @@
 import BetterSqlite3 from 'better-sqlite3';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readPixcallLibrary } from '../../src/worker/pixcall-library';
 import { LibraryService } from '../../src/worker/library-service';
@@ -83,12 +83,196 @@ function writePixcallLibrary(root: string): string {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
   }
 });
 
 describe('Pixcall library import', () => {
+  it('migrates precise folder-tree ranks, including empty folders and selected subtrees', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    const Database = BetterSqlite3 as unknown as { new (filename: string): { exec(sql: string): void; close(): void } };
+    const db = new Database(path.join(sourceRootPath, '.pixcall', 'database', 'main.db'));
+    try {
+      db.exec(`ALTER TABLE entries ADD COLUMN ranking BIGINT;
+        UPDATE entries SET ranking = 1;
+        INSERT INTO entries(id,parent_id,name,kind,is_deleted) VALUES
+          (10,1,'Z空目录',0,0),(11,583319777801380864,'Z子目录',0,0);
+        CREATE TABLE folders(entry_id BIGINT, ranking BIGINT);
+        INSERT INTO folders VALUES
+          (10,8999999999999999998),(583319777801380864,8999999999999999999),
+          (11,8999999999999999998),(583319777805575168,8999999999999999999);`);
+    } finally { db.close(); }
+    const snapshot = readPixcallLibrary(sourceRootPath);
+    expect(snapshot.folderOrder).toEqual(expect.arrayContaining([
+      { relativePath: 'Z空目录', position: 0 }, { relativePath: '赛事', position: 1 },
+      { relativePath: '赛事/Z子目录', position: 0 }, { relativePath: '赛事/一等奖', position: 1 },
+    ]));
+    expect(readPixcallLibrary(path.join(sourceRootPath, '赛事')).folderOrder)
+      .not.toContainEqual(expect.objectContaining({ relativePath: 'Z空目录' }));
+    const service = new LibraryService({ observerFactory: () => ({ close() {} }) });
+    try {
+      const library = service.createLibrary({ displayName: 'Folder Order', selectedParentPath: root });
+      const result = await service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath });
+      const folders = service.listManagedFolders(library.libraryId);
+      for (const expected of snapshot.folderOrder) {
+        const folder = folders.find((item) => item.relativePath === expected.relativePath)!;
+        expect(result.folderOrder).toContainEqual({ folderId: folder.folderId, parentFolderId: folder.parentFolderId, position: expected.position });
+      }
+      // A repeat import preserves originals and returns the same folder identities.
+      const repeated = await service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath });
+      expect(repeated.importedCount).toBe(0);
+      expect(repeated.folderOrder).toEqual(result.folderOrder);
+    } finally { service.closeAll(); }
+  });
+
+  it('splits large inputs at the byte budget rather than filling the file-count limit', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    for (const name of ['hero.png', 'plain.png']) {
+      truncateSync(path.join(sourceRootPath, '赛事', '一等奖', name), 33 * 1024 * 1024);
+    }
+    const service = new LibraryService({ observerFactory: () => ({ close() {} }) });
+    try {
+      const library = service.createLibrary({ displayName: 'Byte Budget Target', selectedParentPath: root });
+      const prepare = vi.spyOn(service, 'prepareImport');
+      const result = await service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath });
+      expect(result).toMatchObject({ importedCount: 2 });
+      expect(prepare.mock.calls.map(([input]) => input.sourceEntries?.length).filter((count) => count! > 0))
+        .toEqual([1, 1]);
+    } finally { service.closeAll(); }
+  });
+
+  it('retains all sources when cancellation arrives after a batch commit', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    let outerImportId = '';
+    const service = new LibraryService({
+      observerFactory: () => ({ close() {} }),
+      onProgress: (event) => {
+        if (event.type === 'import.progress' && event.phase === 'validate') outerImportId = event.importId;
+      },
+    });
+    try {
+      const library = service.createLibrary({ displayName: 'Committed Cancel Target', selectedParentPath: root });
+      const resolve = service.resolveImport.bind(service);
+      vi.spyOn(service, 'resolveImport').mockImplementation((input, options) => {
+        const completion = resolve(input, options);
+        if (options?.atomicBatch) service.cancelImport(outerImportId);
+        return completion;
+      });
+      await expect(service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath }))
+        .rejects.toMatchObject({ code: 'CANCELLED' });
+      const assets = service.listAssets({ libraryId: library.libraryId, recursive: true });
+      expect(assets).toHaveLength(2);
+      const hero = assets.find((asset) => asset.relativeFilePath.endsWith('hero.png'))!;
+      expect(service.getExtractedMetadata({ libraryId: library.libraryId, assetId: hero.assetId }))
+        .toMatchObject({ metadata: { cameraMake: '测试相机', iso: 400 } });
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'hero.png'))).toBe(true);
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'plain.png'))).toBe(true);
+    } finally { service.closeAll(); }
+  });
+
+  it('uses two bounded batches for 130 files and preserves identical files at distinct paths', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    const Database = BetterSqlite3 as unknown as { new (filename: string): { exec(sql: string): void; close(): void } };
+    const db = new Database(path.join(sourceRootPath, '.pixcall', 'database', 'main.db'));
+    try {
+      for (let index = 0; index < 128; index += 1) {
+        writeFileSync(path.join(sourceRootPath, '赛事', '一等奖', `copy-${index}.png`), ONE_PX_RED_PNG);
+        db.exec(`INSERT INTO entries (id, parent_id, name, kind, is_deleted)
+          VALUES (${1000 + index}, 583319777805575168, 'copy-${index}.png', 1, 0)`);
+      }
+    } finally { db.close(); }
+    const changes: number[] = [];
+    const service = new LibraryService({
+      observerFactory: () => ({ close() {} }),
+      onAssetsChanged: (event) => { changes.push(event.changedCount); },
+    });
+    try {
+      const library = service.createLibrary({ displayName: 'Batch Target', selectedParentPath: root });
+      const prepare = vi.spyOn(service, 'prepareImport');
+      const result = await service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath });
+      expect(result).toMatchObject({ importedCount: 130 });
+      expect(prepare.mock.calls.map(([input]) => input.sourceEntries?.length).filter((count) => count! > 0))
+        .toEqual([128, 2]);
+      expect(changes).toEqual([128, 2]);
+      expect(service.listAssets({ libraryId: library.libraryId, recursive: true })).toHaveLength(130);
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'copy-127.png'))).toBe(true);
+    } finally { service.closeAll(); }
+  });
+
+  it('keeps EXIF and duplicate reports aligned after a duplicate is skipped and another file is renamed', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    const service = new LibraryService({ observerFactory: () => ({ close() {} }) });
+    try {
+      const library = service.createLibrary({ displayName: 'Mapping Target', selectedParentPath: root });
+      const folder = path.join(library.libraryPath, 'Assets', '赛事', '一等奖');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(path.join(folder, 'plain.png'), readFileSync(path.join(sourceRootPath, '赛事', '一等奖', 'plain.png')));
+      writeFileSync(path.join(folder, 'hero.png'), 'existing hero');
+      const result = await service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath });
+      expect(result).toMatchObject({ importedCount: 1, skippedCount: 2, metadataCount: 1 });
+      const hero = service.listAssets({ libraryId: library.libraryId, recursive: true })
+        .find((asset) => asset.relativeFilePath.endsWith('hero (2).png'))!;
+      expect(service.getExtractedMetadata({ libraryId: library.libraryId, assetId: hero.assetId }))
+        .toMatchObject({ metadata: { cameraMake: '测试相机', iso: 400 } });
+      expect(readFileSync(path.join(folder, 'hero.png'), 'utf8')).toBe('existing hero');
+      expect(readFileSync(path.join(folder, 'hero (2).png'))).toEqual(ONE_PX_RED_PNG);
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'hero.png'))).toBe(true);
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'plain.png'))).toBe(true);
+    } finally { service.closeAll(); }
+  });
+
+  it('rolls back the whole batch and retains sources when a later asset fails to commit', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    const service = new LibraryService({ observerFactory: () => ({ close() {} }) });
+    try {
+      const library = service.createLibrary({ displayName: 'Rollback Target', selectedParentPath: root });
+      let commits = 0;
+      vi.spyOn(service as unknown as { failAt(point: string): void }, 'failAt').mockImplementation((point) => {
+        if (point === 'before-db-commit' && ++commits === 2) throw new Error('second asset commit failed');
+      });
+      await expect(service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath }))
+        .rejects.toMatchObject({ code: 'IMPORT_APPLY_FAILED' });
+      expect(service.listAssets({ libraryId: library.libraryId, recursive: true })).toEqual([]);
+      for (const name of ['hero.png', 'plain.png']) {
+        expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', name))).toBe(true);
+        expect(existsSync(path.join(library.libraryPath, 'Assets', '赛事', '一等奖', name))).toBe(false);
+      }
+    } finally { service.closeAll(); }
+  });
+
+  it('accepts cancellation between staged files through the event loop', async () => {
+    const root = temporaryRoot();
+    const sourceRootPath = writePixcallLibrary(root);
+    let cancellationQueued = false;
+    const service = new LibraryService({
+      observerFactory: () => ({ close() {} }),
+      onProgress: (event) => {
+        if (!cancellationQueued && event.type === 'import.progress' && event.phase === 'copy' && event.filesProcessed === 1) {
+          cancellationQueued = true;
+          setImmediate(() => service.cancelImport(event.importId));
+        }
+      },
+    });
+    try {
+      const library = service.createLibrary({ displayName: 'Cancel Target', selectedParentPath: root });
+      await expect(service.importPixcallLibrary({ libraryId: library.libraryId, sourceRootPath }))
+        .rejects.toMatchObject({ code: 'CANCELLED' });
+      expect(cancellationQueued).toBe(true);
+      expect(service.listAssets({ libraryId: library.libraryId, recursive: true })).toEqual([]);
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'hero.png'))).toBe(true);
+      expect(existsSync(path.join(sourceRootPath, '赛事', '一等奖', 'plain.png'))).toBe(true);
+    } finally { service.closeAll(); }
+  });
+
+
   it('rejects a normal folder without the Pixcall database marker', () => {
     const root = temporaryRoot();
     writeFileSync(path.join(root, 'not-pixcall.png'), ONE_PX_RED_PNG);

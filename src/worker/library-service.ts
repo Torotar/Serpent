@@ -4051,6 +4051,8 @@ interface BatchRelinkMatch {
 }
 
 interface ImportSourceEntry {
+  /** Caller-owned identity retained through staging and conflict renaming. */
+  sourceEntryIndex?: number;
   /** Hash verified source bytes as they are copied into staging. */
   hashWhileCopy?: boolean;
   byteSize: number;
@@ -4067,6 +4069,13 @@ interface ImportSourceEntry {
   sourcePageUrl?: string;
   sourceSnapshot: SourceSnapshot;
   sourcePath: string;
+}
+
+interface CommittedImportEntry {
+  sourceEntryIndex: number;
+  assetId: string;
+  revisionId: string;
+  destinationRelativePath: string;
 }
 
 interface SourceSnapshot {
@@ -43294,7 +43303,7 @@ export class LibraryService {
       return 'name-conflict';
     }
 
-    if (!ignoreBatchContentHash && seenContentHashes.has(entrySha256)) {
+    if (!ignoreBatchContentHash && entry.sourceEntryIndex === undefined && seenContentHashes.has(entrySha256)) {
       return 'suspected-duplicate';
     }
 
@@ -45109,14 +45118,15 @@ export class LibraryService {
     const tagIdsByName = new Map<string, string>();
     let importedCount = 0;
     let skippedCount = root.skippedCount;
-    const skippedItems: Array<{ relativePath: string; reason: 'unreadable' | 'unsafe' | 'duplicate' | 'metadata-failed' }> = [...root.skippedItems];
+    const skippedItems: PixcallImportResult['skippedItems'] = [...root.skippedItems];
     let replacedCount = 0;
     let invalidItemCount = root.skippedCount;
     let metadataCount = 0;
     const sampleAssets: AssetSummary[] = [];
-    // One source per transaction preserves the source-to-destination mapping
-    // when conflict resolution renames an imported file.
-    const batchSize = 1;
+    // Bound both transaction size and staged bytes. Explicit entry identities
+    // preserve metadata associations even when files are skipped/renamed.
+    const batchSize = 128;
+    const maxBatchBytes = 64 * 1024 * 1024;
     const destinationIndex = this.managedDestinationIndex(openLibrary);
     let lastCopyProgressAt = 0;
     const emitCopyProgress = (force = false): void => {
@@ -45127,15 +45137,24 @@ export class LibraryService {
     };
 
     try {
-      for (let offset = 0; offset < root.items.length; offset += batchSize) {
+      for (let offset = 0; offset < root.items.length;) {
         throwIfCancelled();
-        const items = root.items.slice(offset, offset + batchSize);
+        let end = offset;
+        let plannedBytes = 0;
+        while (end < root.items.length && end - offset < batchSize) {
+          const nextBytes = root.items[end]!.byteSize;
+          if (end > offset && plannedBytes + nextBytes > maxBatchBytes) break;
+          plannedBytes += nextBytes;
+          end += 1;
+        }
+        const items = root.items.slice(offset, end);
         if (offset === 0) emitPixcallProgress('copy', 0, 0);
         this.ensurePixcallTags(openLibrary, items, tagIdsByName);
         const batch: ImportSourceEntry[] = [];
-        for (const item of items) {
+        for (const [sourceEntryIndex, item] of items.entries()) {
           const entry = this.pixcallImportEntry(root.sourceRootPath, item, tagIdsByName);
           if (entry) {
+            entry.sourceEntryIndex = sourceEntryIndex;
             batch.push(entry);
           } else {
             skippedCount += 1;
@@ -45148,7 +45167,7 @@ export class LibraryService {
         if (batch.length > 0) {
           let plan: ImportConflictPlan;
           try {
-            const prepared = this.prepareImport({
+            const prepared = await this.prepareImport({
               libraryId: input.libraryId,
               sourceKind: 'files',
               sourcePaths: batch.map((entry) => entry.sourcePath),
@@ -45158,6 +45177,8 @@ export class LibraryService {
               dedupeSameNameByContent: true,
               skipLibraryDuplicateScan: true,
               skipContentHash: false,
+              transferCancel: cancelState,
+              yieldTransferCheckpoints: true,
               destinationIndex,
               onStagedEntry: (batchProcessed, stagedBytes) => {
                 throwIfCancelled();
@@ -45168,7 +45189,9 @@ export class LibraryService {
               },
               suppressAssetChangeEvents: true,
             });
+            this.activeImports.delete(prepared.importId);
             if (isImportSourceFailurePlan(prepared)) {
+              this.abandonImport(prepared.importId);
               throw new LibraryServiceError('INVALID_IMPORT_SOURCE');
             }
             plan = prepared;
@@ -45180,35 +45203,40 @@ export class LibraryService {
             throwIfCancelled();
           }
           let completion: ImportCompletion;
+          const committedEntries: CommittedImportEntry[] = [];
           try {
             completion = this.resolveImport({
               importId: plan.importId,
               suspectedDuplicate: 'skip',
               nameConflict: 'keep-both',
-            });
+            }, { atomicBatch: true, committedEntries });
           } catch (error) {
             throw this.wrapEagleImportStageError(error, 'IMPORT_REGISTER_FAILED');
           }
-          if (completion.importedCount === 1 && completion.assets.length === 1 && items[0]?.metadata?.exif) {
-            const asset = completion.assets[0]!;
-            const current = openLibrary.connection.prepare('SELECT current_revision_id FROM assets WHERE asset_id = ?')
-              .get(asset.assetId) as { current_revision_id: string | null } | undefined;
-            if (current?.current_revision_id) {
-              const saved = await this.persistRawImageMetadata(openLibrary, asset.assetId, current.current_revision_id,
-                this.folderPath(openLibrary, asset.relativeFilePath), normalizeRawImageMetadata(items[0].metadata.exif),
-                { width: items[0].metadata.width, height: items[0].metadata.height });
-              if (!saved) skippedItems.push({ relativePath: items[0].relativePath, reason: 'metadata-failed' });
-            }
-          }
-          if (completion.importedCount === 1 && items[0]?.metadata) metadataCount += 1;
-          importedCount += completion.importedCount;
-          skippedCount += completion.skippedCount;
-          if (completion.skippedCount > 0) skippedItems.push({ relativePath: items[0]!.relativePath, reason: 'duplicate' });
-          replacedCount += completion.replacedCount;
           this.suppressAutoAnalysisForAssets(
             input.libraryId,
-            completion.assets.map((asset) => asset.assetId),
+            committedEntries.map((entry) => entry.assetId),
           );
+          const committedIndices = new Set(committedEntries.map((entry) => entry.sourceEntryIndex));
+          for (const committedEntry of committedEntries) {
+            const item = items[committedEntry.sourceEntryIndex]!;
+            if (item.metadata) metadataCount += 1;
+            if (item.metadata?.exif) {
+              const saved = await this.persistRawImageMetadata(openLibrary, committedEntry.assetId, committedEntry.revisionId,
+                this.folderPath(openLibrary, committedEntry.destinationRelativePath), normalizeRawImageMetadata(item.metadata.exif),
+                { width: item.metadata.width, height: item.metadata.height });
+              if (!saved) skippedItems.push({ relativePath: item.relativePath, reason: 'metadata-failed' });
+            }
+            await transferCheckpoint();
+          }
+          for (const entry of batch) {
+            if (!committedIndices.has(entry.sourceEntryIndex!)) {
+              skippedItems.push({ relativePath: items[entry.sourceEntryIndex!]!.relativePath, reason: 'duplicate' });
+            }
+          }
+          importedCount += completion.importedCount;
+          skippedCount += completion.skippedCount;
+          replacedCount += completion.replacedCount;
           if (sampleAssets.length < 300) {
             sampleAssets.push(...completion.assets.slice(0, 300 - sampleAssets.length));
           }
@@ -45228,6 +45256,7 @@ export class LibraryService {
           batchBytesBefore + items.reduce((total, item) => total + item.byteSize, 0),
         );
         emitCopyProgress(filesProcessed === totalFiles);
+        offset = end;
         await transferCheckpoint();
         throwIfCancelled();
       }
@@ -45248,7 +45277,13 @@ export class LibraryService {
         this.resolveImport({ importId: plan.importId, suspectedDuplicate: 'skip', nameConflict: 'keep-both' });
       }
       emitPixcallProgress('complete', totalFiles, totalBytes);
+      const foldersByPath = new Map(this.listManagedFolders(input.libraryId, true)
+        .map((folder) => [folder.relativePath, folder]));
       return {
+        folderOrder: root.folderOrder.flatMap(({ relativePath, position }) => {
+          const folder = foldersByPath.get(relativePath);
+          return folder ? [{ folderId: folder.folderId, parentFolderId: folder.parentFolderId, position }] : [];
+        }),
         sourceDisplayName: root.displayName,
         fileCount: root.items.length,
         importedCount,
@@ -45376,6 +45411,9 @@ export class LibraryService {
     importId: string;
     suspectedDuplicate: SuspectedDuplicateDecision;
     nameConflict: NameConflictDecision;
+  }, options?: {
+    atomicBatch?: boolean;
+    committedEntries?: CommittedImportEntry[];
   }): ImportCompletion {
     const pending = this.pendingImports.get(input.importId);
     if (!pending) throw new LibraryServiceError('IMPORT_NOT_FOUND');
@@ -45767,12 +45805,14 @@ export class LibraryService {
     };
 
     const affectedAssetIds: string[] = [];
+    const committedEntries: CommittedImportEntry[] = [];
     let importedCount = 0;
     let replacedCount = 0;
     let committed = false;
     let destinationGuardFailed = false;
 
     const completeCommittedImport = (): ImportCompletion => {
+      options?.committedEntries?.push(...committedEntries);
       const affected = [...new Set([...affectedAssetIds, ...mergedAssetIds])];
       let assetCount = new Set(affectedAssetIds).size;
       try {
@@ -46102,6 +46142,14 @@ export class LibraryService {
         })();
         if (committedAssetId) {
           affectedAssetIds.push(committedAssetId);
+          if (action.entry.sourceEntryIndex !== undefined && committedRevisionId) {
+            committedEntries.push({
+              sourceEntryIndex: action.entry.sourceEntryIndex,
+              assetId: committedAssetId,
+              revisionId: committedRevisionId,
+              destinationRelativePath: action.destinationRelativePath,
+            });
+          }
           if (action.entry.eagleMetadata && committedRevisionId) {
             if (bulkCommit) {
               deferredThumbnails.push({
@@ -46177,6 +46225,18 @@ export class LibraryService {
               count: copiedThumbs.length,
             });
           }
+        }
+      } else if (options?.atomicBatch) {
+        try {
+          openLibrary.connection.transaction(commitImportedAssets)();
+        } catch (error) {
+          // The outer transaction rolled back every row. Do not mistake
+          // in-memory IDs from earlier savepoints for durable partial work.
+          affectedAssetIds.length = 0;
+          committedEntries.length = 0;
+          importedCount = 0;
+          replacedCount = 0;
+          throw error;
         }
       } else {
         commitImportedAssets();

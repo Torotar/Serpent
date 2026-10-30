@@ -267,6 +267,12 @@ export type BillfishImportResult = z.infer<typeof billfishImportResultSchema>;
 
 /** Result of importing a Pixcall library folder into the current library. */
 export const pixcallImportResultSchema = z.strictObject({
+  folderOrder: z.array(z.strictObject({
+    folderId: nonBlankString,
+    parentFolderId: nonBlankString.nullable(),
+    position: z.number().int().nonnegative(),
+  })).optional(),
+
   skippedItems: z.array(z.strictObject({ relativePath: z.string().min(1).max(32768), reason: z.enum(['unreadable', 'unsafe', 'duplicate', 'metadata-failed']) })).max(1000000),
   sourceDisplayName: safeDisplayName,
   importedCount: z.number().int().nonnegative(),

@@ -48,6 +48,7 @@ export interface PixcallLibrarySnapshot {
   displayName: string;
   sourceRootPath: string;
   directories: string[];
+  folderOrder: Array<{ relativePath: string; position: number }>;
   items: PixcallAssetCandidate[];
   skippedCount: number;
   skippedItems: Array<{ relativePath: string; reason: 'unreadable' | 'unsafe' }>;
@@ -59,6 +60,7 @@ interface PixcallEntryRow {
   parentId: string;
   name: string;
   kind: number;
+  ranking: string | null;
   description: string | null;
   link: string | null;
   tags: string | null;
@@ -193,11 +195,14 @@ function tagIds(value: unknown): string[] {
 }
 
 function entryRows(database: PixcallDatabase, selectedSegments: string[]): PixcallEntryRow[] {
+  const columns = database.prepare('PRAGMA table_info(entries)').all() as Array<{ name: string }>;
+  const ranking = columns.some((column) => column.name === 'ranking')
+    ? 'CAST(ranking AS TEXT)' : 'NULL';
   let selectedId = ACTIVE_LIBRARY_ROOT_ID;
   const ancestors: Array<Record<string, unknown>> = [];
   for (const segment of selectedSegments) {
     const matches = database.prepare(`SELECT CAST(id AS TEXT) AS id, CAST(parent_id AS TEXT) AS parentId,
-      name, kind, description, link, tags, rating, metadata, is_deleted AS isDeleted
+      name, kind, ${ranking} AS ranking, description, link, tags, rating, metadata, is_deleted AS isDeleted
       FROM entries WHERE parent_id = CAST(? AS INTEGER) AND name = ? AND kind = 0 AND is_deleted = 0 LIMIT 2`)
       .all(selectedId, segment) as Array<Record<string, unknown>>;
     if (matches.length !== 1) throw new PixcallLibraryReadError('The selected folder is not a unique active Pixcall folder.');
@@ -216,6 +221,7 @@ function entryRows(database: PixcallDatabase, selectedSegments: string[]): Pixca
               CAST(parent_id AS TEXT) AS parentId,
               name,
               kind,
+              ${ranking} AS ranking,
               description,
               link,
               tags,
@@ -236,6 +242,7 @@ function entryRows(database: PixcallDatabase, selectedSegments: string[]): Pixca
     parentId: textValue(row.parentId, 128),
     name: textValue(row.name, 1_024),
     kind: finiteNumber(row.kind) ?? -1,
+    ranking: typeof row.ranking === 'string' ? row.ranking : null,
     description: typeof row.description === 'string' ? row.description : null,
     link: typeof row.link === 'string' ? row.link : null,
     tags: typeof row.tags === 'string' ? row.tags : null,
@@ -424,6 +431,17 @@ export function readPixcallLibrary(sourceRootPath: string): PixcallLibrarySnapsh
     });
     database.exec('PRAGMA query_only = ON; PRAGMA busy_timeout = 3000;');
     rows = entryRows(database, selectedSegments);
+    // Pixcall's folder tree has its own rank; entries.ranking orders the
+    // content grid. Older databases may only provide the latter.
+    const folderTable = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'folders'").all();
+    if (folderTable.length > 0) {
+      const columns = database.prepare('PRAGMA table_info(folders)').all() as Array<{ name: string }>;
+      if (columns.some((column) => column.name === 'ranking')) {
+        const ranks = database.prepare('SELECT CAST(entry_id AS TEXT) AS id, CAST(ranking AS TEXT) AS ranking FROM folders').all() as Array<{ id: string; ranking: string | null }>;
+        const byId = new Map(ranks.map((row) => [row.id, row.ranking]));
+        rows = rows.map((row) => ({ ...row, ranking: byId.get(row.id) ?? row.ranking }));
+      }
+    }
     const selectedRows = rows.filter((row) => row.kind === 1);
     tagNames = readTagNames(database, selectedRows);
     exif = readExif(database, selectedRows);
@@ -500,6 +518,19 @@ export function readPixcallLibrary(sourceRootPath: string): PixcallLibrarySnapsh
   }
 
   items.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  const siblings = new Map<string, Array<{ relativePath: string; rank: bigint }>>();
+  for (const row of rows) {
+    if (row.kind !== 0 || !row.ranking || !/^-?\d+$/u.test(row.ranking)) continue;
+    const segments = pathSegmentsForEntry(row, entriesById);
+    if (!segments || !isSelected(segments) || !directories.has(segments.join('/'))) continue;
+    const group = siblings.get(row.parentId) ?? [];
+    group.push({ relativePath: segments.join('/'), rank: BigInt(row.ranking) });
+    siblings.set(row.parentId, group);
+  }
+  const folderOrder = [...siblings.values()].flatMap((group) => {
+    group.sort((a, b) => a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : a.relativePath.localeCompare(b.relativePath));
+    return group.map(({ relativePath }, position) => ({ relativePath, position }));
+  });
   if (items.length === 0 && directories.size === 0 && skippedCount === 0) {
     throw new PixcallLibraryReadError('The selected Pixcall library does not contain active assets.');
   }
@@ -507,6 +538,7 @@ export function readPixcallLibrary(sourceRootPath: string): PixcallLibrarySnapsh
     displayName: sourceRootDisplayName(root),
     sourceRootPath: root,
     directories: [...directories].sort(),
+    folderOrder,
     items,
     skippedCount,
     skippedItems,

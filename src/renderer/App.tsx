@@ -13,6 +13,8 @@ import {
 import { createPortal, flushSync } from "react-dom";
 
 import { Icon, type IconName } from "./Icons";
+import { createCoalescedRefresh } from "./coalesced-refresh";
+import { importFolderCustomOrder } from "./folder-custom-order";
 import { isCurrentAiConnectionProbe } from "./ai-connection-probe-guard";
 import { iconActionAttrs } from "./icon-action-attrs";
 import { EditTextContextMenuHost } from "./edit-text-context-menu";
@@ -1787,6 +1789,7 @@ function AppInner() {
       document.removeEventListener("focusout", onFocusOut, true);
     };
   }, []);
+  const [coalesceOperationHistoryRefresh] = useState(createCoalescedRefresh);
   const refreshOperationHistory = useCallback(async () => {
     if (!api || !library) {
       setOperationHistory(null);
@@ -1795,11 +1798,13 @@ function AppInner() {
     const targetLibraryId = library.libraryId;
     const viewSession = ensureLibraryView(targetLibraryId);
     if (!viewSession) return;
-    const result = await api.getOperationHistoryStatus({ libraryId: targetLibraryId });
-    if (result.ok && isCurrentLibraryView(viewSession)) {
-      setOperationHistory(result.value);
-    }
-  }, [api, ensureLibraryView, isCurrentLibraryView, library]);
+    await coalesceOperationHistoryRefresh(targetLibraryId, async () => {
+      const result = await api.getOperationHistoryStatus({ libraryId: targetLibraryId });
+      if (result.ok && isCurrentLibraryView(viewSession)) {
+        setOperationHistory(result.value);
+      }
+    });
+  }, [api, coalesceOperationHistoryRefresh, ensureLibraryView, isCurrentLibraryView, library]);
   useEffect(() => {
     const refreshTimer = window.setTimeout(() => {
       void refreshOperationHistory();
@@ -9989,6 +9994,7 @@ function AppInner() {
         }
         throw new LibraryOperationError(result.error);
       }
+      importFolderCustomOrder(library.libraryId, result.value.folderOrder ?? []);
       setNotice(importSummaryMessage(result.value, locale));
       if (result.value.skippedItems.length > 0) {
         setPixcallSkippedPage(0);
