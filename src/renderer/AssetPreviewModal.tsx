@@ -92,6 +92,9 @@ import { isBakeableStillImageFile } from "../shared/bakeable-still-image";
 interface AssetPreviewModalProps {
   api: SerpentLibraryApi;
   asset: AssetSummary;
+  openingPlaceholder?: string;
+  /** Let the decoded thumbnail carry the opening flight before loading the original. */
+  deferOriginal?: boolean;
   /** When on, quarter-turns of bakeable stills are written into the file. */
   bakeImageRotation?: boolean;
   /** Owned by a parent that survives per-asset remounts (Serpent-ayf). */
@@ -206,6 +209,8 @@ const AssetPreviewModalContent = forwardRef<
   {
     api,
     asset,
+    openingPlaceholder,
+    deferOriginal = false,
     bakeImageRotation = false,
     chromeIdle,
     libraryId,
@@ -913,7 +918,7 @@ const AssetPreviewModalContent = forwardRef<
       .catch(() => undefined);
   }
 
-  const placeholderUrl = resolveViewerPlaceholderUrl(asset, libraryId);
+  const placeholderUrl = openingPlaceholder ?? resolveViewerPlaceholderUrl(asset, libraryId);
   const primarySurface = resolveViewerPrimarySurface({
     loading,
     resolution,
@@ -925,7 +930,7 @@ const AssetPreviewModalContent = forwardRef<
   const viewerError = error ?? manualRetryError;
   const ready = primarySurface === "media";
   const unsupported = primarySurface === "unsupported";
-  const imageSrc = resolution?.url ?? placeholderUrl;
+  const imageSrc = deferOriginal && placeholderUrl ? placeholderUrl : resolution?.url ?? placeholderUrl;
   const pluginProvidedImage = ready
     && resolution?.mediaType === "image"
     && Boolean(resolution.url)

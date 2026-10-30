@@ -126,7 +126,12 @@ export function useViewerZoomPan({
       } else {
         const ratio = viewRef.current.scale / previousFit;
         commitView({
-          scale: clampViewerScale(nextFit * ratio),
+          // Camera originals may fit below the manual zoom floor. Preserve
+          // their fitted size across mip upgrades, just as reset/fit does;
+          // clamping a fitted original to 5% makes large portraits jump larger.
+          scale: isAtFitScale(viewRef.current.scale, previousFit)
+            ? nextFit
+            : clampViewerScale(nextFit * ratio),
           x: viewRef.current.x,
           y: viewRef.current.y,
         });

@@ -4979,6 +4979,9 @@ body.serpent-modal-open .app-shell {
 }
 .workspace-viewer.is-photo-flight .preview-image {
   visibility: hidden;
+  /* The flight owns the pixels; hide every viewer layer in the same frame
+     without inheriting a transition from another presentation state. */
+  transition: none;
 }
 .workspace-viewer:focus,
 .workspace-viewer:focus-visible {
@@ -6183,15 +6186,30 @@ body.serpent-modal-open .app-shell {
 }
 .preview-image-full {
   visibility: hidden;
+  opacity: 0;
+  /* Swap decoded mip layers in one frame. Fading both layers together
+     exposes the backdrop halfway through (even for an opaque photograph). */
+  transition: none;
 }
 .preview-image-full.is-hidden {
   visibility: hidden;
+  opacity: 0;
 }
 .preview-image-full.is-visible {
   visibility: visible;
+  opacity: 1;
+  transition: none;
+}
+.preview-image-placeholder {
+  opacity: 1;
+  transition: none;
 }
 .preview-image-placeholder.is-hidden {
   visibility: hidden;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-image-full, .preview-image-placeholder { transition: none; }
 }
 .preview-chrome-fade {
   opacity: 1;
@@ -12107,6 +12125,11 @@ select.ai-config-input.ai-config-languages {
   overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
+}
+
+.asset-card-media .adaptive-card-upgrade {
+  position: absolute;
+  inset: 0;
 }
 
 /* Serpent-l2at / Serpent-qc7v: 占位 caption 与完成卡共用 .asset-caption 间距；
