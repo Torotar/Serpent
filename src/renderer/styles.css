@@ -18772,13 +18772,17 @@ body.platform-darwin .app-shell[data-shell-layout="islands"] .toolbar-nav-cluste
   overflow: visible;
 }
 .app-shell[data-shell-layout="islands"] .asset-card .asset-preview {
-  border-radius: var(--island-card-radius);
+  /* The preview meets the caption inside the card: only its outer top
+     corners are rounded. Keep a single mask here so stacked cover/live
+     layers do not repeatedly clip the same antialiased edge. */
+  border-radius: var(--island-card-radius) var(--island-card-radius) 0 0;
   outline: 1px solid var(--island-hairline);
   outline-offset: -1px;
 }
 .app-shell[data-shell-layout="islands"] .asset-card .asset-preview .asset-card-media,
 .app-shell[data-shell-layout="islands"] .asset-card .asset-preview .asset-thumbnail {
-  border-radius: inherit;
+  border-radius: 0;
+  overflow: visible;
 }
 .app-shell[data-shell-layout="islands"] .asset-card.is-selected,
 .app-shell[data-shell-layout="islands"] .asset-card:focus-visible,
