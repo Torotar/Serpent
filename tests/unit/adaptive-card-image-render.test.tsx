@@ -4,13 +4,55 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdaptiveCardImage, CARD_IMAGE_UPGRADE_IDLE_MS } from "../../src/renderer/adaptive-card-image";
 import type { SerpentLibraryApi } from "../../src/shared/library-api";
+import { NAVIGATION_REFLOW_START, NAVIGATION_REFLOW_END } from "../../src/renderer/navigation-reflow-transition";
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren(); delete document.documentElement.dataset.navTransition; });
 
 async function settleImageSize() {
   await act(async () => { await vi.advanceTimersByTimeAsync(CARD_IMAGE_UPGRADE_IDLE_MS); });
 }
+
+it("defers image measurements and original requests until navigation playback and reversals finish", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const reads = vi.spyOn(HTMLImageElement.prototype, "getBoundingClientRect")
+    .mockImplementation(() => new DOMRect(0, 0, 600, 300));
+  const requestPreview = vi.fn().mockResolvedValue({ ok: true, value: { status: "ready", url: "serpent://source/image" } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const start = () => {
+    document.documentElement.dataset.navTransition = "true";
+    window.dispatchEvent(new Event(NAVIGATION_REFLOW_START));
+  };
+  const end = () => {
+    delete document.documentElement.dataset.navTransition;
+    window.dispatchEvent(new Event(NAVIGATION_REFLOW_END));
+  };
+  try {
+    await act(async () => root.render(createElement(AdaptiveCardImage, {
+      alt: "photo", coverUrl: "serpent://preview/cover", loadImmediately: true, onError: vi.fn(),
+      source: { api: { requestPreview } as unknown as SerpentLibraryApi, libraryId: "library", assetId: "asset", revisionId: "revision", width: 4000, height: 2000 },
+    })));
+    const cover = host.querySelector("img")!;
+    Object.defineProperties(cover, { naturalWidth: { value: 512 }, naturalHeight: { value: 256 } });
+    await act(async () => { cover.dispatchEvent(new Event("load")); start(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(reads).not.toHaveBeenCalled();
+    expect(requestPreview).not.toHaveBeenCalled();
+    await act(async () => { end(); await vi.advanceTimersByTimeAsync(100); start(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reads).not.toHaveBeenCalled();
+    expect(requestPreview).not.toHaveBeenCalled();
+    await act(async () => { end(); await vi.advanceTimersByTimeAsync(CARD_IMAGE_UPGRADE_IDLE_MS - 1); });
+    expect(reads).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(reads).toHaveBeenCalledOnce();
+    expect(requestPreview).toHaveBeenCalledOnce();
+    expect(host.querySelector("img")).toBe(cover);
+  } finally { await act(async () => root.unmount()); }
+});
 
 it("keeps the cover visible while requesting and decoding a larger image", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

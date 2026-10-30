@@ -197,8 +197,11 @@ describe("navigation snapshot reflow", () => {
     await latest.updateCallbackDone;
     const rules = document.querySelector("style[data-nav-motion]")!.textContent;
     expect(rules).toContain("animation-name: nav-canvas-viewport");
-    expect(rules).toContain("width: 800px; height: 600px; transform: translate(224px, 128px)");
-    expect(rules).toContain("width: 1024px; height: 600px; transform: translate(0px, 128px)");
+    expect(rules).toContain("width: 1024px; height: 600px;");
+    expect(rules).toContain("clip-path: inset(0 224px 0px 0); transform: translate(224px, 128px)");
+    expect(rules).toContain("clip-path: inset(0 0px 0px 0); transform: translate(0px, 128px)");
+    const viewportKeyframes = rules.split("@keyframes nav-canvas-viewport")[1]?.split("\n}")[0];
+    expect(viewportKeyframes).not.toMatch(/width:|height:|scale\(/);
     expect(rules).toContain("matrix(0.8333333333333334, 0, 0, 0.8333333333333334, 20, -220)");
     expect(rules).toContain("matrix(1, 0, 0, 1, 30, -248)");
     endPlayback();

@@ -1,3 +1,6 @@
+export const NAVIGATION_REFLOW_START = "serpent:navigation-reflow-start";
+export const NAVIGATION_REFLOW_END = "serpent:navigation-reflow-end";
+
 /** Stage destination geometry before React publishes navigation and canvas width
  * together. A separate state commit here would render the whole library twice. */
 export function stageNavigationToggle(shell: HTMLElement): boolean {
@@ -38,6 +41,7 @@ export class NavigationReflowTransition {
     motionStyles.dataset.navMotion = "true";
     const html = document.documentElement;
     html.dataset.navTransition = "true";
+    window.dispatchEvent(new Event(NAVIGATION_REFLOW_START));
     const name = (element: HTMLElement | null, value: string) => {
       if (!element) return;
       if (!saved.has(element)) saved.set(element, element.style.viewTransitionName || "");
@@ -87,7 +91,10 @@ export class NavigationReflowTransition {
       before.set(value, rect);
       name(card, value);
     }
+    let released = false;
     const cleanup = () => {
+      if (released) return;
+      released = true;
       motionStyles.remove();
       for (const [element, value] of saved) element.style.viewTransitionName = value;
       for (const [element, value] of savedClasses) {
@@ -95,6 +102,7 @@ export class NavigationReflowTransition {
         else element.style.removeProperty("view-transition-class");
       }
       delete html.dataset.navTransition;
+      window.dispatchEvent(new Event(NAVIGATION_REFLOW_END));
     };
     this.release = cleanup;
     let transition: ViewTransition;
@@ -212,15 +220,22 @@ function relativeRect(rect: DOMRect, parent: DOMRect): DOMRect {
   return new DOMRect(rect.left - parent.left, rect.top - parent.top, rect.width, rect.height);
 }
 
-/** Only the viewport bounds change size. Nested cards keep their original
- * translation/scale paths because this parent translates without scaling. */
+/** Keep snapshot geometry fixed throughout playback. Animating viewport width
+ * would relayout its nested snapshot tree every frame; interpolate the clip
+ * instead, while the cards retain their independent translation/scale paths. */
 function snapshotViewportRule(from: DOMRect, to: DOMRect): string {
+  const width = Math.max(from.width, to.width);
+  const height = Math.max(from.height, to.height);
   return `
 :root[data-nav-transition]::view-transition-group(nav-canvas) {
+  width: ${width}px; height: ${height}px;
   animation-name: nav-canvas-viewport;
 }
+:root[data-nav-transition]::view-transition-new(nav-canvas) {
+  width: ${to.width}px; height: ${to.height}px;
+}
 @keyframes nav-canvas-viewport {
-  from { width: ${from.width}px; height: ${from.height}px; transform: translate(${from.left}px, ${from.top}px); }
-  to { width: ${to.width}px; height: ${to.height}px; transform: translate(${to.left}px, ${to.top}px); }
+  from { clip-path: inset(0 ${width - from.width}px ${height - from.height}px 0); transform: translate(${from.left}px, ${from.top}px); }
+  to { clip-path: inset(0 ${width - to.width}px ${height - to.height}px 0); transform: translate(${to.left}px, ${to.top}px); }
 }`;
 }

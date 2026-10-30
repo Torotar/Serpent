@@ -436,10 +436,14 @@ summary:focus-visible {
 }
 :root[data-nav-transition]::view-transition { pointer-events: none; }
 :root[data-nav-transition]::view-transition-group(*),
+:root[data-nav-transition]::view-transition-group-children(*),
 :root[data-nav-transition]::view-transition-old(*),
 :root[data-nav-transition]::view-transition-new(*) {
-  animation-duration: 200ms;
-  animation-timing-function: cubic-bezier(0.2, 0, 0.2, 1);
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Old card pixels are hidden; plus-lighter cross-fade blending only adds
+     another offscreen surface for every independently moving thumbnail. */
+  mix-blend-mode: normal;
 }
 :root[data-nav-transition]::view-transition-group(*) { z-index: 2; }
 :root[data-nav-transition]::view-transition-group(root) { z-index: 0; }

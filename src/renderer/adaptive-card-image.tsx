@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SerpentLibraryApi } from "../shared/library-api";
+import { NAVIGATION_REFLOW_START, NAVIGATION_REFLOW_END } from "./navigation-reflow-transition";
 
 export const CARD_IMAGE_UPGRADE_IDLE_MS = 200;
 
@@ -63,6 +64,9 @@ export function AdaptiveCardImage({ alt, coverUrl, source, loadImmediately, susp
       setUpgradeIdle(false);
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
+        // Layout can be idle while compositor snapshots are still moving.
+        // The end event restarts this timer after playback, including reversals.
+        if (document.documentElement.hasAttribute("data-nav-transition")) return;
         measure();
         setUpgradeIdle(true);
       }, CARD_IMAGE_UPGRADE_IDLE_MS);
@@ -72,11 +76,18 @@ export function AdaptiveCardImage({ alt, coverUrl, source, loadImmediately, susp
     observer.observe(image);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
-    return () => { clearTimeout(idleTimer); observer.disconnect(); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
+    window.addEventListener(NAVIGATION_REFLOW_START, update);
+    window.addEventListener(NAVIGATION_REFLOW_END, update);
+    return () => {
+      clearTimeout(idleTimer); observer.disconnect();
+      window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true);
+      window.removeEventListener(NAVIGATION_REFLOW_START, update);
+      window.removeEventListener(NAVIGATION_REFLOW_END, update);
+    };
   }, [api, width, height, coverSize, coverUrl, suspendUpgrade]);
 
   useEffect(() => {
-    if (suspendUpgrade || !upgradeIdle || !needsUpgrade || upgradeUrl || upgradeFailed || !api || !libraryId || !assetId || !revisionId) return;
+    if (suspendUpgrade || document.documentElement.hasAttribute("data-nav-transition") || !upgradeIdle || !needsUpgrade || upgradeUrl || upgradeFailed || !api || !libraryId || !assetId || !revisionId) return;
     let cancelled = false;
     void api.requestPreview({ libraryId, assetId, mode: "client", intent: "viewer" }).then((result) => {
       if (!cancelled && result.ok && result.value.status === "ready" && result.value.url && result.value.url !== coverUrl) setUpgradeUrl(result.value.url);
