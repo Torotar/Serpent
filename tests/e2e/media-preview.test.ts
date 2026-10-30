@@ -680,8 +680,28 @@ test("generates a decoded thumbnail and keeps asset viewer context coherent", as
     await expect
       .poll(() => svgPreviewImage.getAttribute("src"))
       .toContain("serpent://source/");
-    await window.keyboard.press("Escape");
+    const imageViewport = svgPreview.locator(".preview-image-viewport");
+    const imageWidth = await svgPreviewImage.evaluate((image) => image.getBoundingClientRect().width);
+    await imageViewport.hover();
+    await window.mouse.wheel(0, -10);
+    await expect.poll(() => svgPreviewImage.evaluate((image) => image.getBoundingClientRect().width)).toBeGreaterThan(imageWidth);
+    const returnLayout = window.evaluate(() => new Promise<{ toolbarVisible: boolean; cardTop: number }>((resolve) => {
+      const workspace = document.querySelector<HTMLElement>(".workspace")!;
+      const observer = new MutationObserver(() => {
+        if (workspace.dataset.photoReturn !== "active") return;
+        const toolbar = workspace.querySelector<HTMLElement>(".workspace-bar")!;
+        const card = workspace.querySelector<HTMLElement>('.asset-card[aria-pressed="true"] .asset-preview')!;
+        observer.disconnect();
+        resolve({ toolbarVisible: getComputedStyle(toolbar).visibility === "visible" && getComputedStyle(toolbar).display !== "none", cardTop: card.getBoundingClientRect().top });
+      });
+      observer.observe(workspace, { attributes: true, attributeFilter: ["data-photo-return"] });
+    }));
+    await imageViewport.dblclick();
+    const duringReturn = await returnLayout;
     await expect(svgPreview).toBeHidden();
+    expect(duringReturn.toolbarVisible).toBe(true);
+    const finalCardTop = await svgAssetCard.locator(".asset-preview").evaluate((card) => card.getBoundingClientRect().top);
+    expect(Math.abs(duringReturn.cardTop - finalCardTop)).toBeLessThanOrEqual(2);
 
     const masonryViewButton = window.locator(
       'button[aria-label="瀑布流视图"]',

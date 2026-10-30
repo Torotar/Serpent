@@ -146,6 +146,7 @@ export const ZoomableImage = forwardRef<
     viewportRef,
     zoomAt,
   } = useViewerZoomPan({
+    imageWheelShortcut: true,
     keyboardShortcutsDisabled,
     onSwipeNext,
     onSwipePrevious,

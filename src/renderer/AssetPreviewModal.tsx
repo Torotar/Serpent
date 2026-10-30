@@ -1168,6 +1168,12 @@ const AssetPreviewModalContent = forwardRef<
       aria-hidden={preloadOnly || undefined}
       inert={preloadOnly || undefined}
       className={`workspace-viewer${chromeIdle ? " is-chrome-idle" : ""}${isTextViewer ? " is-text-viewer" : ""}${isDocumentViewer ? " is-document-viewer" : ""}${preloadOnly ? " is-preview-preloading" : ""}${navArrowsOnApproach ? " is-nav-proximity" : ""}${navNear === "prev" ? " is-nav-near-prev" : ""}${navNear === "next" ? " is-nav-near-next" : ""}`}
+      onDoubleClick={(event) => {
+        if (preloadOnly || !showImage || !(event.target instanceof Element) ||
+            !event.target.closest(".preview-image-viewport, .preview-video-viewport")) return;
+        event.stopPropagation();
+        void requestClose();
+      }}
       onContextMenu={(event) => {
         if (preloadOnly || !viewerContextMenuAvailable) return;
         event.preventDefault();
@@ -1768,7 +1774,7 @@ export const AssetPreviewModal = forwardRef<
           asset={asset}
           fullscreenRootRef={fullscreenRootRef}
           key={asset.assetId}
-          onPresentationReady={targetIsCurrent || targetWasPromoted ? undefined : promoteTarget}
+          onPresentationReady={targetIsCurrent || targetWasPromoted ? props.onPresentationReady : promoteTarget}
           preloadOnly={!targetIsCurrent && !targetWasPromoted}
           ref={targetIsCurrent || targetWasPromoted ? ref : undefined}
         />

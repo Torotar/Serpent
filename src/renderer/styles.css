@@ -4977,6 +4977,9 @@ body.serpent-modal-open .app-shell {
   visibility: hidden;
   pointer-events: none;
 }
+.workspace-viewer.is-photo-flight .preview-image {
+  visibility: hidden;
+}
 .workspace-viewer:focus,
 .workspace-viewer:focus-visible {
   outline: none;
@@ -19749,4 +19752,54 @@ body.platform-darwin .app-shell[data-shell-layout="islands"] .toolbar-nav-cluste
   border-color: var(--danger);
   background: var(--danger-muted);
   color: var(--danger);
+}
+
+/* Prepare the final browse layout behind the viewer before measuring a return. */
+.workspace[data-photo-return] > .workspace-toolstrip {
+  display: block;
+}
+.app-shell[data-shell-layout="islands"] .workspace[data-photo-return] > .workspace-toolstrip {
+  display: flex;
+}
+.workspace[data-photo-return] .workspace-bar.is-viewing,
+.workspace[data-photo-return] .workspace-discovery.is-viewing {
+  display: flex;
+}
+.workspace[data-photo-return] > .workspace-canvas-host.is-viewing {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: auto;
+  flex: 1;
+}
+.workspace[data-photo-return] > .workspace-viewer-transition {
+  position: absolute;
+  inset: 0;
+}
+.workspace[data-photo-return="prepare"] > .workspace-toolstrip,
+.workspace[data-photo-return="prepare"] > .workspace-canvas-host {
+  visibility: hidden;
+}
+.workspace[data-photo-return="active"] > .workspace-toolstrip,
+.workspace[data-photo-return="active"] .workspace-bar,
+.workspace[data-photo-return="active"] .workspace-discovery,
+.workspace[data-photo-return="active"] > .workspace-canvas-host,
+.workspace[data-photo-return="active"] > .workspace-canvas-host > .workspace-canvas {
+  visibility: visible;
+}
+.workspace[data-photo-return="opening"] > .workspace-canvas-host,
+.workspace[data-photo-return="opening"] > .workspace-canvas-host > .workspace-canvas,
+.workspace[data-photo-return="opening-active"] > .workspace-canvas-host,
+.workspace[data-photo-return="opening-active"] > .workspace-canvas-host > .workspace-canvas {
+  visibility: visible;
+}
+.workspace[data-photo-return="opening"] > .workspace-toolstrip,
+.workspace[data-photo-return="opening"] > .workspace-canvas-host,
+.workspace[data-photo-return="opening-active"] > .workspace-toolstrip,
+.workspace[data-photo-return="opening-active"] > .workspace-canvas-host {
+  transition: opacity 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.workspace[data-photo-return="opening-active"] > .workspace-toolstrip,
+.workspace[data-photo-return="opening-active"] > .workspace-canvas-host {
+  opacity: 0;
 }
